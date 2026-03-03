@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Bot</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #00d9ff;
+        }
+        
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .search-box input {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            background: #16213e;
+            color: #fff;
+            font-size: 16px;
+        }
+        
+        .search-box button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            background: #00d9ff;
+            color: #1a1a2e;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .search-box button:hover {
+            background: #00b8d4;
+        }
+        
+        .now-playing {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .now-playing h2 {
+            color: #00d9ff;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        
+        .now-playing .title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .now-playing .artist {
+            color: #888;
+        }
+        
+        .now-playing .empty {
+            color: #555;
+            font-style: italic;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        
+        .controls button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: #16213e;
+            color: #fff;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        .controls button:hover {
+            background: #1f3460;
+        }
+        
+        .controls button.active {
+            background: #00d9ff;
+            color: #1a1a2e;
+        }
+        
+        .volume-control {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .volume-control input {
+            width: 100px;
+        }
+        
+        .queue {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 15px;
+        }
+        
+        .queue h3 {
+            margin-bottom: 15px;
+            color: #00d9ff;
+        }
+        
+        .queue-list {
+            list-style: none;
+        }
+        
+        .queue-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #1f3460;
+            cursor: pointer;
+        }
+        
+        .queue-item:hover {
+            background: #1f3460;
+        }
+        
+        .queue-item.playing {
+            background: #1f3460;
+            border-left: 3px solid #00d9ff;
+        }
+        
+        .queue-item .info {
+            flex: 1;
+        }
+        
+        .queue-item .title {
+            font-weight: bold;
+        }
+        
+        .queue-item .artist {
+            color: #888;
+            font-size: 12px;
+        }
+        
+        .queue-item .remove {
+            background: none;
+            border: none;
+            color: #ff4444;
+            cursor: pointer;
+            padding: 5px 10px;
+        }
+        
+        .search-results {
+            margin-bottom: 20px;
+        }
+        
+        .search-results h3 {
+            margin-bottom: 10px;
+            color: #00d9ff;
+        }
+        
+        .result-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: #16213e;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        
+        .result-item:hover {
+            background: #1f3460;
+        }
+        
+        .result-item .info {
+            flex: 1;
+        }
+        
+        .result-item .title {
+            font-weight: bold;
+        }
+        
+        .result-item .artist {
+            color: #888;
+            font-size: 12px;
+        }
+        
+        .result-item button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            background: #00d9ff;
+            color: #1a1a2e;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .clear-btn {
+            background: #ff4444 !important;
+            color: #fff !important;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 Music Bot</h1>
+        
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="Search for songs...">
+            <button onclick="search()">Search</button>
+        </div>
+        
+        <div class="search-results" id="searchResults"></div>
+        
+        <div class="now-playing">
+            <h2>Now Playing</h2>
+            <div id="nowPlaying">
+                <div class="empty">No song playing</div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button onclick="previous()">⏮</button>
+            <button id="playPauseBtn" onclick="togglePlay()">▶</button>
+            <button onclick="stop()">⏹</button>
+            <button onclick="next()">⏭</button>
+        </div>
+        
+        <div class="volume-control">
+            <span>🔊</span>
+            <input type="range" id="volume" min="0" max="100" value="80" onchange="setVolume(this.value)">
+            <span id="volumeValue">80%</span>
+        </div>
+        
+        <div class="queue">
+            <h3>
+                Queue
+                <button class="clear-btn" onclick="clearQueue()">Clear All</button>
+            </h3>
+            <ul class="queue-list" id="queueList"></ul>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let state = null;
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+            
+            ws.onmessage = (event) => {
+                state = JSON.parse(event.data);
+                updateUI();
+            };
+            
+            ws.onclose = () => {
+                setTimeout(connect, 1000);
+            };
+        }
+
+        function updateUI() {
+            if (!state) return;
+
+            const nowPlaying = document.getElementById('nowPlaying');
+            if (state.current) {
+                nowPlaying.innerHTML = `
+                    <div class="title">${state.current.title}</div>
+                    <div class="artist">${state.current.artist}</div>
+                `;
+            } else {
+                nowPlaying.innerHTML = '<div class="empty">No song playing</div>';
+            }
+
+            const playPauseBtn = document.getElementById('playPauseBtn');
+            playPauseBtn.textContent = state.state === 'playing' ? '⏸' : '▶';
+            playPauseBtn.classList.toggle('active', state.state === 'playing');
+
+            const volume = document.getElementById('volume');
+            volume.value = state.volume;
+            document.getElementById('volumeValue').textContent = state.volume + '%';
+
+            const queueList = document.getElementById('queueList');
+            queueList.innerHTML = state.queue.map((item, index) => `
+                <li class="queue-item ${index === state.current_index ? 'playing' : ''}" onclick="playIndex(${index})">
+                    <div class="info">
+                        <div class="title">${item.title}</div>
+                        <div class="artist">${item.artist}</div>
+                    </div>
+                    <button class="remove" onclick="event.stopPropagation(); removeFromQueue(${index})">✕</button>
+                </li>
+            `).join('');
+        }
+
+        async function search() {
+            const query = document.getElementById('searchInput').value;
+            if (!query) return;
+
+            const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+            const results = await res.json();
+
+            const container = document.getElementById('searchResults');
+            container.innerHTML = `
+                <h3>Search Results</h3>
+                ${results.map(item => `
+                    <div class="result-item">
+                        <div class="info">
+                            <div class="title">${item.title}</div>
+                            <div class="artist">${item.artist}</div>
+                        </div>
+                        <button onclick='addToQueue(${JSON.stringify(item)})'>Add</button>
+                    </div>
+                `).join('')}
+            `;
+        }
+
+        async function addToQueue(result) {
+            await fetch('/api/queue/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(result)
+            });
+            document.getElementById('searchResults').innerHTML = '';
+            document.getElementById('searchInput').value = '';
+        }
+
+        async function removeFromQueue(index) {
+            await fetch(`/api/queue/remove?index=${index}`, {method: 'POST'});
+        }
+
+        async function clearQueue() {
+            await fetch('/api/queue/clear', {method: 'POST'});
+        }
+
+        async function playIndex(index) {
+            await fetch(`/api/player/play?index=${index}`, {method: 'POST'});
+        }
+
+        async function togglePlay() {
+            if (state?.state === 'playing') {
+                await fetch('/api/player/pause', {method: 'POST'});
+            } else {
+                await fetch('/api/player/play', {method: 'POST'});
+            }
+        }
+
+        async function stop() {
+            await fetch('/api/player/stop', {method: 'POST'});
+        }
+
+        async function next() {
+            await fetch('/api/player/next', {method: 'POST'});
+        }
+
+        async function previous() {
+            await fetch('/api/player/prev', {method: 'POST'});
+        }
+
+        async function setVolume(vol) {
+            await fetch(`/api/player/volume?volume=${vol}`, {method: 'POST'});
+        }
+
+        document.getElementById('searchInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') search();
+        });
+
+        connect();
+    </script>
+</body>
+</html>

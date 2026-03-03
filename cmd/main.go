@@ -1,0 +1,62 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"musicbot/player"
+	"musicbot/queue"
+	"musicbot/server"
+)
+
+func main() {
+	cfg, err := server.LoadConfig("config.yaml")
+	if err != nil {
+		log.Println("Using default config:", err)
+		cfg = &server.Config{
+			Server: server.ServerConfig{
+				Host: "0.0.0.0",
+				Port: 8080,
+			},
+			Music: server.MusicConfig{
+				OutputDevice: "default",
+				Volume:       80,
+			},
+		}
+	}
+
+	q := queue.New("queue.json")
+	p := player.New(q, cfg.Music.Volume, cfg.Music.OutputDevice)
+
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	s := server.New(addr, p)
+
+	go func() {
+		log.Printf("Starting server on %s", addr)
+		if err := s.Start(); err != nil {
+			log.Printf("Server error: %v", err)
+		}
+	}()
+
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			state := p.GetState()
+			if string(state.State) == "stopped" && len(state.Queue) > 0 {
+				p.Next()
+			}
+		}
+	}()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	log.Println("Shutting down...")
+	p.Shutdown()
+	s.Stop()
+}

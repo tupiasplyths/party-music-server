@@ -1,0 +1,220 @@
+package server
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	"sync"
+
+	"github.com/gorilla/websocket"
+	"musicbot/player"
+	"musicbot/ytmusic"
+)
+
+type Server struct {
+	httpServer *http.Server
+	player     *player.Player
+	upgrader   websocket.Upgrader
+	clients    map[*websocket.Conn]bool
+	clientsMu  sync.RWMutex
+}
+
+func New(addr string, p *player.Player) *Server {
+	s := &Server{
+		player:  p,
+		clients: make(map[*websocket.Conn]bool),
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool { return true },
+		},
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", s.handleWebSocket)
+	mux.HandleFunc("/api/search", s.handleSearch)
+	mux.HandleFunc("/api/queue/add", s.handleQueueAdd)
+	mux.HandleFunc("/api/queue/remove", s.handleQueueRemove)
+	mux.HandleFunc("/api/queue/clear", s.handleQueueClear)
+	mux.HandleFunc("/api/queue/move", s.handleQueueMove)
+	mux.HandleFunc("/api/player/play", s.handlePlay)
+	mux.HandleFunc("/api/player/pause", s.handlePause)
+	mux.HandleFunc("/api/player/resume", s.handleResume)
+	mux.HandleFunc("/api/player/stop", s.handleStop)
+	mux.HandleFunc("/api/player/next", s.handleNext)
+	mux.HandleFunc("/api/player/prev", s.handlePrev)
+	mux.HandleFunc("/api/player/volume", s.handleVolume)
+	mux.HandleFunc("/api/player/state", s.handleState)
+	mux.HandleFunc("/", s.handleStatic)
+
+	s.httpServer = &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	p.SetBroadcast(s.broadcast)
+
+	return s
+}
+
+func (s *Server) broadcast(msg interface{}) {
+	s.clientsMu.RLock()
+	defer s.clientsMu.RUnlock()
+
+	data, _ := json.Marshal(msg)
+	for conn := range s.clients {
+		conn.WriteMessage(websocket.TextMessage, data)
+	}
+}
+
+func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("WebSocket upgrade error:", err)
+		return
+	}
+
+	s.clientsMu.Lock()
+	s.clients[conn] = true
+	s.clientsMu.Unlock()
+
+	conn.WriteJSON(s.player.GetState())
+
+	defer func() {
+		s.clientsMu.Lock()
+		delete(s.clients, conn)
+		s.clientsMu.Unlock()
+		conn.Close()
+	}()
+
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+	}
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		http.Error(w, "missing query", http.StatusBadRequest)
+		return
+	}
+
+	yt := ytmusic.New()
+	results, err := yt.Search(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(results)
+}
+
+func (s *Server) handleQueueAdd(w http.ResponseWriter, r *http.Request) {
+	var result ytmusic.SearchResult
+	if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.player.AddToQueue(result)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleQueueRemove(w http.ResponseWriter, r *http.Request) {
+	index := r.URL.Query().Get("index")
+	if index == "" {
+		http.Error(w, "missing index", http.StatusBadRequest)
+		return
+	}
+
+	var i int
+	json.Unmarshal([]byte(index), &i)
+	s.player.RemoveFromQueue(i)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleQueueClear(w http.ResponseWriter, r *http.Request) {
+	s.player.ClearQueue()
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleQueueMove(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		From int `json:"from"`
+		To   int `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.player.GetQueue()
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
+	index := r.URL.Query().Get("index")
+	if index != "" {
+		var i int
+		json.Unmarshal([]byte(index), &i)
+		s.player.PlayIndex(i)
+	} else {
+		s.player.Play()
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handlePause(w http.ResponseWriter, r *http.Request) {
+	s.player.Pause()
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
+	s.player.Resume()
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
+	s.player.Stop()
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleNext(w http.ResponseWriter, r *http.Request) {
+	s.player.Next()
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handlePrev(w http.ResponseWriter, r *http.Request) {
+	s.player.Previous()
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleVolume(w http.ResponseWriter, r *http.Request) {
+	vol := r.URL.Query().Get("volume")
+	if vol == "" {
+		http.Error(w, "missing volume", http.StatusBadRequest)
+		return
+	}
+
+	var v int
+	json.Unmarshal([]byte(vol), &v)
+	s.player.SetVolume(v)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
+	json.NewEncoder(w).Encode(s.player.GetState())
+}
+
+func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
+	http.FileServer(http.Dir("web")).ServeHTTP(w, r)
+}
+
+func (s *Server) Start() error {
+	return s.httpServer.ListenAndServe()
+}
+
+func (s *Server) Stop() error {
+	return s.httpServer.Close()
+}
