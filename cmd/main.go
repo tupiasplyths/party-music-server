@@ -30,7 +30,7 @@ func main() {
 	}
 
 	q := queue.New("queue.json")
-	p := player.New(q, cfg.Music.Volume, cfg.Music.OutputDevice)
+	p := player.New(q, cfg.Music.Volume, cfg.Music.OutputDevice, cfg.Music.YtDlpPath, cfg.Music.FfplayPath)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	s := server.New(addr, p)

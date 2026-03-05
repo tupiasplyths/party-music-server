@@ -2,7 +2,6 @@ package ytmusic
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -24,14 +23,10 @@ type Client struct {
 	ytDlp   string
 }
 
-func New() *Client {
-	ytDlp := "./yt-dlp"
-	if os.PathSeparator == '\\' {
-		ytDlp = "yt-dlp.exe"
-	}
+func New(ytDlpPath string) *Client {
 	return &Client{
 		timeout: 30 * time.Second,
-		ytDlp:   ytDlp,
+		ytDlp:   ytDlpPath,
 	}
 }
 

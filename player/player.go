@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"runtime"
 	"sync"
 
 	"musicbot/queue"
@@ -25,6 +24,8 @@ type Player struct {
 	broadcast   func(interface{})
 	ctx         context.Context
 	cancel      context.CancelFunc
+	ytDlpPath   string
+	ffplayPath  string
 }
 
 type PlaybackState string
@@ -35,17 +36,19 @@ const (
 	StatePaused  PlaybackState = "paused"
 )
 
-func New(q *queue.Queue, volume int, device string) *Player {
+func New(q *queue.Queue, volume int, device string, ytDlpPath, ffplayPath string) *Player {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &Player{
-		queue:  q,
-		volume: volume,
-		device: device,
-		state:  StateStopped,
-		ctx:    ctx,
-		cancel: cancel,
+		queue:      q,
+		volume:     volume,
+		device:     device,
+		state:      StateStopped,
+		ctx:        ctx,
+		cancel:     cancel,
+		ytDlpPath:  ytDlpPath,
+		ffplayPath: ffplayPath,
 	}
-	p.ytClient = ytmusic.New()
+	p.ytClient = ytmusic.New(ytDlpPath)
 
 	return p
 }
@@ -67,11 +70,12 @@ func (p *Player) broadcastState() {
 func (p *Player) GetState() PlayerState {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	return p.getStateLocked()
+}
 
+func (p *Player) getStateLocked() PlayerState {
 	queueItems := p.queue.GetAll()
 	currentIndex := p.queue.GetCurrentIndex()
-
-	log.Printf("DEBUG: GetState - Queue items: %d, Current index: %d, Current item: %v\n", len(queueItems), currentIndex, p.currentItem)
 
 	state := PlayerState{
 		State:        p.state,
@@ -119,24 +123,13 @@ type NowPlaying struct {
 	Duration  int    `json:"duration"`
 }
 
-func getAudioPlayer() string {
-	if runtime.GOOS == "windows" {
-		return "ffplay.exe"
-	}
-	return "ffplay"
-}
-
-func getYtDlp() string {
-	if runtime.GOOS == "windows" {
-		return "yt-dlp.exe"
-	}
-	return "yt-dlp"
-}
-
 func (p *Player) Play() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.playLocked()
+}
 
+func (p *Player) playLocked() error {
 	if p.state == StatePlaying {
 		return nil
 	}
@@ -162,13 +155,11 @@ func (p *Player) playItem(item *queue.QueueItem) error {
 		}
 
 		p.mu.Lock()
-		defer p.mu.Unlock()
-
 		if p.currentCmd != nil && p.currentCmd.Process != nil {
 			p.currentCmd.Process.Kill()
 		}
 
-		ffplay := getAudioPlayer()
+		ffplay := p.ffplayPath
 
 		args := []string{
 			"-i", streamURL,
@@ -184,11 +175,14 @@ func (p *Player) playItem(item *queue.QueueItem) error {
 		err = cmd.Start()
 		if err != nil {
 			log.Printf("Failed to start player: %v", err)
+			p.mu.Unlock()
 			return
 		}
 
 		p.currentCmd = cmd
 		p.state = StatePlaying
+		p.mu.Unlock()
+
 		p.broadcastState()
 
 		go func() {
@@ -196,9 +190,11 @@ func (p *Player) playItem(item *queue.QueueItem) error {
 			p.mu.Lock()
 			if p.state == StatePlaying {
 				p.state = StateStopped
+				p.mu.Unlock()
 				p.broadcastState()
+			} else {
+				p.mu.Unlock()
 			}
-			p.mu.Unlock()
 		}()
 	}()
 
@@ -207,9 +203,9 @@ func (p *Player) playItem(item *queue.QueueItem) error {
 
 func (p *Player) Pause() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	if p.state != StatePlaying {
+		p.mu.Unlock()
 		return nil
 	}
 
@@ -217,6 +213,8 @@ func (p *Player) Pause() error {
 		p.currentCmd.Process.Kill()
 	}
 	p.state = StatePaused
+	p.mu.Unlock()
+
 	p.broadcastState()
 	return nil
 }
@@ -233,7 +231,7 @@ func (p *Player) Resume() error {
 		return p.playItem(p.currentItem)
 	}
 
-	return p.Play()
+	return p.playLocked()
 }
 
 func (p *Player) Stop() error {
@@ -251,7 +249,6 @@ func (p *Player) Stop() error {
 
 func (p *Player) Next() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	if p.currentCmd != nil && p.currentCmd.Process != nil {
 		p.currentCmd.Process.Kill()
@@ -261,17 +258,18 @@ func (p *Player) Next() error {
 	if item == nil {
 		p.state = StateStopped
 		p.currentItem = nil
+		p.mu.Unlock()
 		p.broadcastState()
 		return nil
 	}
 
 	p.currentItem = item
+	p.mu.Unlock()
 	return p.playItem(item)
 }
 
 func (p *Player) Previous() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	if p.currentCmd != nil && p.currentCmd.Process != nil {
 		p.currentCmd.Process.Kill()
@@ -281,18 +279,18 @@ func (p *Player) Previous() error {
 	if item == nil {
 		p.state = StateStopped
 		p.currentItem = nil
+		p.mu.Unlock()
 		p.broadcastState()
 		return nil
 	}
 
 	p.currentItem = item
+	p.mu.Unlock()
 	return p.playItem(item)
 }
 
 func (p *Player) SetVolume(vol int) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if vol < 0 {
 		vol = 0
 	}
@@ -301,6 +299,8 @@ func (p *Player) SetVolume(vol int) error {
 	}
 
 	p.volume = vol
+	p.mu.Unlock()
+
 	p.broadcastState()
 	return nil
 }
@@ -339,18 +339,12 @@ func (p *Player) ClearQueue() {
 	p.queue.Clear()
 	log.Println("DEBUG: Queue cleared, broadcasting state")
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	log.Println("DEBUG: ClearQueue acquired lock")
 	if p.currentItem != nil {
-		log.Println("DEBUG: ClearQueue - had current item, setting to nil")
 		p.currentItem = nil
 	}
-	log.Println("DEBUG: ClearQueue - broadcasting state")
-	if p.broadcast != nil {
-		state := p.GetState()
-		log.Printf("DEBUG: ClearQueue - Broadcasting state - Queue length: %d, Current: %v, State: %s\n", len(state.Queue), state.Current, state.State)
-		p.broadcast(state)
-	}
+	p.mu.Unlock()
+
+	p.broadcastState()
 }
 
 func (p *Player) GetQueue() []queue.QueueItem {
@@ -360,6 +354,10 @@ func (p *Player) GetQueue() []queue.QueueItem {
 func (p *Player) Shutdown() {
 	p.cancel()
 	p.Stop()
+}
+
+func (p *Player) GetYtClient() *ytmusic.Client {
+	return p.ytClient
 }
 
 func (p *Player) Context() context.Context {

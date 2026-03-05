@@ -1,4 +1,7 @@
 .claude
 .playwright*
-yt-dlp
-musicbot
+yt-dlp*
+musicbot*
+_internal
+ffplay*
+queue.json

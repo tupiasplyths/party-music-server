@@ -7,9 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"musicbot/player"
 	"musicbot/ytmusic"
+
+	"github.com/gorilla/websocket"
 )
 
 type Server struct {
@@ -153,9 +154,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	yt := ytmusic.New()
-	results, err := yt.Search(query)
+	results, err := s.player.GetYtClient().Search(query)
 	if err != nil {
+		log.Printf("Search error: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
