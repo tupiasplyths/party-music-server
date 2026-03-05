@@ -34,8 +34,10 @@ func (c *Client) Search(query string) ([]SearchResult, error) {
 	args := []string{
 		"--no-download",
 		"--no-playlist",
+		"--no-warnings",
+		"--socket-timeout", "5",
 		"--print", "%(id)s|%(title)s|%(artist)s|%(album)s|%(duration)s|%(thumbnail)s|%(url)s",
-		"--default-search", "ytsearch5",
+		"--default-search", "ytsearch3",
 		query,
 	}
 
