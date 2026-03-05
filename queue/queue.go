@@ -2,6 +2,7 @@ package queue
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"sync"
 
@@ -162,9 +163,11 @@ func (q *Queue) Clear() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
+	log.Printf("DEBUG: Queue.Clear called - clearing %d items, current index: %d\n", len(q.Items), q.Current)
 	q.Items = make([]QueueItem, 0)
 	q.Current = -1
 	q.Save()
+	log.Printf("DEBUG: Queue.Clear completed - items: %d, current index: %d\n", len(q.Items), q.Current)
 }
 
 func (q *Queue) GetCurrentIndex() int {

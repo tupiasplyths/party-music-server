@@ -3,6 +3,7 @@ package player
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -55,7 +56,11 @@ func (p *Player) SetBroadcast(fn func(interface{})) {
 
 func (p *Player) broadcastState() {
 	if p.broadcast != nil {
-		p.broadcast(p.GetState())
+		state := p.GetState()
+		log.Printf("DEBUG: Broadcasting state - Queue length: %d, Current: %v\n", len(state.Queue), state.Current)
+		log.Println("DEBUG: About to broadcast to all clients")
+		p.broadcast(state)
+		log.Println("DEBUG: Broadcast completed")
 	}
 }
 
@@ -63,10 +68,15 @@ func (p *Player) GetState() PlayerState {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
+	queueItems := p.queue.GetAll()
+	currentIndex := p.queue.GetCurrentIndex()
+
+	log.Printf("DEBUG: GetState - Queue items: %d, Current index: %d, Current item: %v\n", len(queueItems), currentIndex, p.currentItem)
+
 	state := PlayerState{
 		State:        p.state,
 		Volume:       p.volume,
-		CurrentIndex: p.queue.GetCurrentIndex(),
+		CurrentIndex: currentIndex,
 	}
 
 	if p.currentItem != nil {
@@ -76,10 +86,20 @@ func (p *Player) GetState() PlayerState {
 			Thumbnail: p.currentItem.Thumbnail,
 			Duration:  p.currentItem.Duration,
 		}
+	} else {
+		queueCurrent := p.queue.GetCurrent()
+		if queueCurrent != nil {
+			state.Current = &NowPlaying{
+				Title:     queueCurrent.Title,
+				Artist:    queueCurrent.Artist,
+				Thumbnail: queueCurrent.Thumbnail,
+				Duration:  queueCurrent.Duration,
+			}
+		}
 	}
 
-	state.Queue = p.queue.GetAll()
-	state.CurrentIndex = p.queue.GetCurrentIndex()
+	state.Queue = queueItems
+	state.CurrentIndex = currentIndex
 
 	return state
 }
@@ -134,45 +154,52 @@ func (p *Player) Play() error {
 }
 
 func (p *Player) playItem(item *queue.QueueItem) error {
-	streamURL, err := p.ytClient.GetStreamURL(item.VideoID)
-	if err != nil {
-		return fmt.Errorf("failed to get stream URL: %w", err)
-	}
-
-	if p.currentCmd != nil && p.currentCmd.Process != nil {
-		p.currentCmd.Process.Kill()
-	}
-
-	ffplay := getAudioPlayer()
-
-	args := []string{
-		"-i", streamURL,
-		"-nodisp",
-		"-autoexit",
-		"-volume", fmt.Sprintf("%d", p.volume),
-	}
-
-	cmd := exec.Command(ffplay, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	err = cmd.Start()
-	if err != nil {
-		return err
-	}
-
-	p.currentCmd = cmd
-	p.state = StatePlaying
-	p.broadcastState()
-
 	go func() {
-		cmd.Wait()
-		p.mu.Lock()
-		if p.state == StatePlaying {
-			p.state = StateStopped
-			p.broadcastState()
+		streamURL, err := p.ytClient.GetStreamURL(item.VideoID)
+		if err != nil {
+			log.Printf("Failed to get stream URL: %v", err)
+			return
 		}
-		p.mu.Unlock()
+
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
+		if p.currentCmd != nil && p.currentCmd.Process != nil {
+			p.currentCmd.Process.Kill()
+		}
+
+		ffplay := getAudioPlayer()
+
+		args := []string{
+			"-i", streamURL,
+			"-nodisp",
+			"-autoexit",
+			"-volume", fmt.Sprintf("%d", p.volume),
+		}
+
+		cmd := exec.Command(ffplay, args...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		err = cmd.Start()
+		if err != nil {
+			log.Printf("Failed to start player: %v", err)
+			return
+		}
+
+		p.currentCmd = cmd
+		p.state = StatePlaying
+		p.broadcastState()
+
+		go func() {
+			cmd.Wait()
+			p.mu.Lock()
+			if p.state == StatePlaying {
+				p.state = StateStopped
+				p.broadcastState()
+			}
+			p.mu.Unlock()
+		}()
 	}()
 
 	return nil
@@ -211,13 +238,13 @@ func (p *Player) Resume() error {
 
 func (p *Player) Stop() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	if p.currentCmd != nil && p.currentCmd.Process != nil {
 		p.currentCmd.Process.Kill()
 	}
 	p.currentCmd = nil
 	p.state = StateStopped
+	p.mu.Unlock()
+
 	p.broadcastState()
 	return nil
 }
@@ -296,7 +323,9 @@ func (p *Player) PlayIndex(index int) error {
 }
 
 func (p *Player) AddToQueue(result ytmusic.SearchResult) {
+	log.Printf("DEBUG: AddToQueue called - Title: %s, VideoID: %s\n", result.Title, result.VideoID)
 	p.queue.Add(result)
+	log.Println("DEBUG: AddToQueue - Item added to queue, calling broadcastState")
 	p.broadcastState()
 }
 
@@ -306,8 +335,22 @@ func (p *Player) RemoveFromQueue(index int) {
 }
 
 func (p *Player) ClearQueue() {
+	log.Println("DEBUG: ClearQueue called")
 	p.queue.Clear()
-	p.broadcastState()
+	log.Println("DEBUG: Queue cleared, broadcasting state")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	log.Println("DEBUG: ClearQueue acquired lock")
+	if p.currentItem != nil {
+		log.Println("DEBUG: ClearQueue - had current item, setting to nil")
+		p.currentItem = nil
+	}
+	log.Println("DEBUG: ClearQueue - broadcasting state")
+	if p.broadcast != nil {
+		state := p.GetState()
+		log.Printf("DEBUG: ClearQueue - Broadcasting state - Queue length: %d, Current: %v, State: %s\n", len(state.Queue), state.Current, state.State)
+		p.broadcast(state)
+	}
 }
 
 func (p *Player) GetQueue() []queue.QueueItem {
@@ -317,4 +360,8 @@ func (p *Player) GetQueue() []queue.QueueItem {
 func (p *Player) Shutdown() {
 	p.cancel()
 	p.Stop()
+}
+
+func (p *Player) Context() context.Context {
+	return p.ctx
 }

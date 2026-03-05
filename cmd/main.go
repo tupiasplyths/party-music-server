@@ -35,6 +35,8 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	s := server.New(addr, p)
 
+	p.SetBroadcast(s.Broadcast)
+
 	go func() {
 		log.Printf("Starting server on %s", addr)
 		if err := s.Start(); err != nil {
@@ -44,10 +46,14 @@ func main() {
 
 	go func() {
 		for {
-			time.Sleep(1 * time.Second)
-			state := p.GetState()
-			if string(state.State) == "stopped" && len(state.Queue) > 0 {
-				p.Next()
+			select {
+			case <-p.Context().Done():
+				return
+			case <-time.After(1 * time.Second):
+				state := p.GetState()
+				if string(state.State) == "stopped" && len(state.Queue) > 0 {
+					go p.Next()
+				}
 			}
 		}
 	}()

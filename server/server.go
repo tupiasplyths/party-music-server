@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"musicbot/player"
@@ -50,7 +51,7 @@ func New(addr string, p *player.Player) *Server {
 		Handler: mux,
 	}
 
-	p.SetBroadcast(s.broadcast)
+	p.SetBroadcast(s.Broadcast)
 
 	return s
 }
@@ -59,10 +60,21 @@ func (s *Server) broadcast(msg interface{}) {
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
 
-	data, _ := json.Marshal(msg)
-	for conn := range s.clients {
-		conn.WriteMessage(websocket.TextMessage, data)
+	data, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("ERROR: Failed to marshal broadcast message: %v\n", err)
+		return
 	}
+	for conn := range s.clients {
+		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			log.Println("broadcast write error:", err)
+		}
+	}
+}
+
+func (s *Server) Broadcast(msg interface{}) {
+	s.broadcast(msg)
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -72,23 +84,64 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		return nil
+	})
+
 	s.clientsMu.Lock()
 	s.clients[conn] = true
+	clientCount := len(s.clients)
 	s.clientsMu.Unlock()
 
-	conn.WriteJSON(s.player.GetState())
+	log.Printf("DEBUG: WebSocket client connected, total clients: %d\n", clientCount)
+
+	state := s.player.GetState()
+	log.Printf("DEBUG: About to send initial state - Queue length: %d\n", len(state.Queue))
+	if err := conn.WriteJSON(state); err != nil {
+		log.Printf("ERROR: Failed to send initial state to WebSocket client: %v\n", err)
+	}
+	log.Printf("DEBUG: Finished sending initial state\n")
 
 	defer func() {
 		s.clientsMu.Lock()
 		delete(s.clients, conn)
+		clientCount = len(s.clients)
 		s.clientsMu.Unlock()
 		conn.Close()
+		log.Printf("DEBUG: WebSocket client disconnected, total clients: %d\n", clientCount)
+	}()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	done := make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					log.Println("WebSocket ping error:", err)
+					close(done)
+					return
+				}
+			}
+		}
 	}()
 
 	for {
-		_, _, err := conn.ReadMessage()
-		if err != nil {
-			break
+		select {
+		case <-done:
+			return
+		default:
+			_, _, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
 		}
 	}
 }
@@ -111,12 +164,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleQueueAdd(w http.ResponseWriter, r *http.Request) {
+	log.Println("DEBUG: handleQueueAdd called")
 	var result ytmusic.SearchResult
 	if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
+		log.Println("DEBUG: handleQueueAdd - decode error:", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	log.Printf("DEBUG: handleQueueAdd - Adding song: %s\n", result.Title)
 	s.player.AddToQueue(result)
 	w.WriteHeader(http.StatusOK)
 }

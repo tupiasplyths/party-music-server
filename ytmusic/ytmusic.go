@@ -25,7 +25,7 @@ type Client struct {
 }
 
 func New() *Client {
-	ytDlp := "yt-dlp"
+	ytDlp := "./yt-dlp"
 	if os.PathSeparator == '\\' {
 		ytDlp = "yt-dlp.exe"
 	}
@@ -41,7 +41,7 @@ func (c *Client) Search(query string) ([]SearchResult, error) {
 		"--no-playlist",
 		"--print", "%(id)s|%(title)s|%(artist)s|%(album)s|%(duration)s|%(thumbnail)s|%(url)s",
 		"--default-search", "ytsearch5",
-		"ytmusic:" + query,
+		query,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)

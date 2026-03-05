@@ -1,0 +1,15 @@
+2026/03/05 15:37:57 Starting server on 0.0.0.0:8080
+2026/03/05 15:37:58 DEBUG: GetState - Queue items: 5, Current index: 4, Current item: <nil>
+2026/03/05 15:37:59 DEBUG: WebSocket client connected, total clients: 1
+2026/03/05 15:40:12 DEBUG: handleQueueAdd called
+2026/03/05 15:40:12 DEBUG: handleQueueAdd - Adding song: TVアニメ『呪術廻戦』第2期「懐玉・玉折」ノンクレジットOPムービー／OPテーマ：キタニタツヤ「青のすみか」｜毎週木曜夜11時56分～MBS/TBS系列全国28局にて放送中!!
+2026/03/05 15:40:12 DEBUG: AddToQueue called - Title: TVアニメ『呪術廻戦』第2期「懐玉・玉折」ノンクレジットOPムービー／OPテーマ：キタニタツヤ「青のすみか」｜毎週木曜夜11時56分～MBS/TBS系列全国28局にて放送中!!, VideoID: gcgKUcJKxIs
+2026/03/05 15:40:12 DEBUG: AddToQueue - Item added to queue, calling broadcastState
+2026/03/05 15:40:58 DEBUG: handleQueueAdd called
+2026/03/05 15:40:58 DEBUG: handleQueueAdd - Adding song: キタニタツヤ - 青のすみか / THE FIRST TAKE
+2026/03/05 15:40:58 DEBUG: AddToQueue called - Title: キタニタツヤ - 青のすみか / THE FIRST TAKE, VideoID: i0K40f-6mLs
+2026/03/05 15:40:58 DEBUG: AddToQueue - Item added to queue, calling broadcastState
+2026/03/05 15:41:23 DEBUG: handleQueueAdd called
+2026/03/05 15:41:23 DEBUG: handleQueueAdd - Adding song: Jujutsu Kaisen Season 2 - Opening FULL "Ao No Sumika" by Tatsuya Kitani (Lyrics)
+2026/03/05 15:41:23 DEBUG: AddToQueue called - Title: Jujutsu Kaisen Season 2 - Opening FULL "Ao No Sumika" by Tatsuya Kitani (Lyrics), VideoID: 2c_lHmkOq0E
+2026/03/05 15:41:23 DEBUG: AddToQueue - Item added to queue, calling broadcastState
