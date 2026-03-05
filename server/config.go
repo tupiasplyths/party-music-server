@@ -38,14 +38,14 @@ func LoadConfig(path string) (*Config, error) {
 		if os.PathSeparator == '\\' {
 			cfg.Music.YtDlpPath = "./yt-dlp.exe"
 		} else {
-			cfg.Music.YtDlpPath = "yt-dlp"
+			cfg.Music.YtDlpPath = "./yt-dlp"
 		}
 	}
 	if cfg.Music.FfplayPath == "" {
 		if os.PathSeparator == '\\' {
 			cfg.Music.FfplayPath = "./ffplay.exe"
 		} else {
-			cfg.Music.FfplayPath = "ffplay"
+			cfg.Music.FfplayPath = "./ffplay"
 		}
 	}
 
