@@ -35,8 +35,6 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	s := server.New(addr, p)
 
-	p.SetBroadcast(s.Broadcast)
-
 	go func() {
 		log.Printf("Starting server on %s", addr)
 		if err := s.Start(); err != nil {

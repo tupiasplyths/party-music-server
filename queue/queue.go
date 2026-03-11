@@ -52,8 +52,14 @@ func (q *Queue) Save() {
 	if q.Filename == "" {
 		return
 	}
-	data, _ := json.MarshalIndent(q, "", "  ")
-	os.WriteFile(q.Filename, data, 0644)
+	data, err := json.MarshalIndent(q, "", "  ")
+	if err != nil {
+		log.Printf("ERROR: Failed to marshal queue: %v", err)
+		return
+	}
+	if err := os.WriteFile(q.Filename, data, 0644); err != nil {
+		log.Printf("ERROR: Failed to write queue file: %v", err)
+	}
 }
 
 func (q *Queue) Add(item ytmusic.SearchResult) {
@@ -180,7 +186,7 @@ func (q *Queue) Move(from, to int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	if from < 0 || from >= len(q.Items) || to < 0 || to >= len(q.Items) {
+	if from < 0 || from >= len(q.Items) || to < 0 || to >= len(q.Items) || from == to {
 		return
 	}
 
@@ -190,9 +196,13 @@ func (q *Queue) Move(from, to int) {
 
 	if q.Current == from {
 		q.Current = to
-	} else if from < q.Current && to >= q.Current {
+	} else if from < q.Current && to < q.Current {
+		// Item moved from before current to before current, no change needed
+	} else if from < q.Current && to > q.Current {
+		// Item moved from before current to after current
 		q.Current--
 	} else if from > q.Current && to <= q.Current {
+		// Item moved from after current to before or at current
 		q.Current++
 	}
 

@@ -2,6 +2,7 @@ package player
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -156,7 +157,13 @@ func (p *Player) playItem(item *queue.QueueItem) error {
 
 		p.mu.Lock()
 		if p.currentCmd != nil && p.currentCmd.Process != nil {
-			p.currentCmd.Process.Kill()
+			if killErr := p.currentCmd.Process.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+				log.Printf("Failed to kill existing process: %v", killErr)
+			}
+			// Wait for the process to ensure proper cleanup
+			if waitErr := p.currentCmd.Wait(); waitErr != nil && !errors.Is(waitErr, os.ErrProcessDone) {
+				log.Printf("Error waiting for killed process: %v", waitErr)
+			}
 		}
 
 		ffplay := p.ffplayPath
@@ -186,19 +193,38 @@ func (p *Player) playItem(item *queue.QueueItem) error {
 		p.broadcastState()
 
 		go func() {
-			cmd.Wait()
+			_ = cmd.Wait()
 			p.mu.Lock()
-			if p.state == StatePlaying {
-				p.state = StateStopped
-				p.mu.Unlock()
-				p.broadcastState()
-			} else {
-				p.mu.Unlock()
+			wasPlaying := p.state == StatePlaying
+			state := p.state
+			currentItem := p.currentItem
+			p.currentCmd = nil
+			p.state = StateStopped
+			p.mu.Unlock()
+			p.broadcastState()
+
+			if wasPlaying && currentItem != nil && state == StatePlaying {
+				log.Printf("Playback interrupted, retrying: %s", currentItem.Title)
+				p.playItem(currentItem)
 			}
 		}()
 	}()
 
 	return nil
+}
+
+func (p *Player) stopCurrentProcess() {
+	p.mu.Lock()
+	if p.currentCmd != nil && p.currentCmd.Process != nil {
+		if killErr := p.currentCmd.Process.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+			log.Printf("Failed to kill process: %v", killErr)
+		}
+		if waitErr := p.currentCmd.Wait(); waitErr != nil && !errors.Is(waitErr, os.ErrProcessDone) {
+			log.Printf("Error waiting for process: %v", waitErr)
+		}
+		p.currentCmd = nil
+	}
+	p.mu.Unlock()
 }
 
 func (p *Player) Pause() error {
@@ -208,10 +234,10 @@ func (p *Player) Pause() error {
 		p.mu.Unlock()
 		return nil
 	}
+	p.mu.Unlock()
 
-	if p.currentCmd != nil && p.currentCmd.Process != nil {
-		p.currentCmd.Process.Kill()
-	}
+	p.stopCurrentProcess()
+	p.mu.Lock()
 	p.state = StatePaused
 	p.mu.Unlock()
 
@@ -235,12 +261,10 @@ func (p *Player) Resume() error {
 }
 
 func (p *Player) Stop() error {
+	p.stopCurrentProcess()
 	p.mu.Lock()
-	if p.currentCmd != nil && p.currentCmd.Process != nil {
-		p.currentCmd.Process.Kill()
-	}
-	p.currentCmd = nil
 	p.state = StateStopped
+	p.currentItem = nil
 	p.mu.Unlock()
 
 	p.broadcastState()
@@ -248,14 +272,11 @@ func (p *Player) Stop() error {
 }
 
 func (p *Player) Next() error {
-	p.mu.Lock()
-
-	if p.currentCmd != nil && p.currentCmd.Process != nil {
-		p.currentCmd.Process.Kill()
-	}
+	p.stopCurrentProcess()
 
 	item := p.queue.Next()
 	if item == nil {
+		p.mu.Lock()
 		p.state = StateStopped
 		p.currentItem = nil
 		p.mu.Unlock()
@@ -263,20 +284,18 @@ func (p *Player) Next() error {
 		return nil
 	}
 
+	p.mu.Lock()
 	p.currentItem = item
 	p.mu.Unlock()
 	return p.playItem(item)
 }
 
 func (p *Player) Previous() error {
-	p.mu.Lock()
-
-	if p.currentCmd != nil && p.currentCmd.Process != nil {
-		p.currentCmd.Process.Kill()
-	}
+	p.stopCurrentProcess()
 
 	item := p.queue.Previous()
 	if item == nil {
+		p.mu.Lock()
 		p.state = StateStopped
 		p.currentItem = nil
 		p.mu.Unlock()
@@ -284,6 +303,7 @@ func (p *Player) Previous() error {
 		return nil
 	}
 
+	p.mu.Lock()
 	p.currentItem = item
 	p.mu.Unlock()
 	return p.playItem(item)
@@ -306,19 +326,16 @@ func (p *Player) SetVolume(vol int) error {
 }
 
 func (p *Player) PlayIndex(index int) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.currentCmd != nil && p.currentCmd.Process != nil {
-		p.currentCmd.Process.Kill()
-	}
+	p.stopCurrentProcess()
 
 	item := p.queue.SetCurrent(index)
 	if item == nil {
 		return fmt.Errorf("invalid index")
 	}
 
+	p.mu.Lock()
 	p.currentItem = item
+	p.mu.Unlock()
 	return p.playItem(item)
 }
 
@@ -349,6 +366,11 @@ func (p *Player) ClearQueue() {
 
 func (p *Player) GetQueue() []queue.QueueItem {
 	return p.queue.GetAll()
+}
+
+func (p *Player) MoveQueueItem(from, to int) {
+	p.queue.Move(from, to)
+	p.broadcastState()
 }
 
 func (p *Player) Shutdown() {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -179,15 +180,19 @@ func (s *Server) handleQueueAdd(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleQueueRemove(w http.ResponseWriter, r *http.Request) {
-	index := r.URL.Query().Get("index")
-	if index == "" {
+	indexStr := r.URL.Query().Get("index")
+	if indexStr == "" {
 		http.Error(w, "missing index", http.StatusBadRequest)
 		return
 	}
 
-	var i int
-	json.Unmarshal([]byte(index), &i)
-	s.player.RemoveFromQueue(i)
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		http.Error(w, "invalid index", http.StatusBadRequest)
+		return
+	}
+
+	s.player.RemoveFromQueue(index)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -206,15 +211,18 @@ func (s *Server) handleQueueMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.player.GetQueue()
+	s.player.MoveQueueItem(req.From, req.To)
 	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 	index := r.URL.Query().Get("index")
 	if index != "" {
-		var i int
-		json.Unmarshal([]byte(index), &i)
+		i, err := strconv.Atoi(index)
+		if err != nil {
+			http.Error(w, "invalid index", http.StatusBadRequest)
+			return
+		}
 		s.player.PlayIndex(i)
 	} else {
 		s.player.Play()
@@ -254,8 +262,11 @@ func (s *Server) handleVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var v int
-	json.Unmarshal([]byte(vol), &v)
+	v, err := strconv.Atoi(vol)
+	if err != nil {
+		http.Error(w, "invalid volume", http.StatusBadRequest)
+		return
+	}
 	s.player.SetVolume(v)
 	w.WriteHeader(http.StatusOK)
 }
