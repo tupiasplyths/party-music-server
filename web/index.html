@@ -679,6 +679,7 @@
         <div class="queue">
             <h3>
                 Queue
+                <span id="queueLimitInfo"></span>
                 <button class="clear-btn" onclick="clearQueue()">Clear All</button>
             </h3>
             <ul class="queue-list" id="queueList"></ul>
@@ -772,6 +773,14 @@
 
             const queueList = document.getElementById('queueList');
             console.log('Queue rendering - state.queue:', state.queue, 'length:', state.queue ? state.queue.length : 0);
+            
+            const queueLimitInfo = document.getElementById('queueLimitInfo');
+            if (state.queue_limit !== undefined) {
+                queueLimitInfo.textContent = `(${state.client_queue_count || 0}/${state.queue_limit})`;
+                queueLimitInfo.style.fontSize = '12px';
+                queueLimitInfo.style.color = '#888';
+            }
+            
             if (!state.queue || state.queue.length === 0) {
                 console.log('Queue is empty, showing empty message');
                 queueList.innerHTML = '<li class="queue-empty">Queue is empty</li>';
@@ -867,6 +876,13 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(result)
                 });
+                if (res.status === 429) {
+                    const errorText = await res.text();
+                    alert(errorText);
+                    btnElement.disabled = false;
+                    btnElement.textContent = 'Add';
+                    return;
+                }
                 if (!res.ok) {
                     throw new Error('Failed to add to queue');
                 }

@@ -2,6 +2,7 @@ package queue
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -17,15 +18,19 @@ type Queue struct {
 }
 
 type QueueItem struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Artist    string `json:"artist"`
-	Album     string `json:"album"`
-	Duration  int    `json:"duration"` // seconds
-	Thumbnail string `json:"thumbnail"`
-	VideoID   string `json:"video_id"`
-	URL       string `json:"url"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Artist        string `json:"artist"`
+	Album         string `json:"album"`
+	Duration      int    `json:"duration"` // seconds
+	Thumbnail     string `json:"thumbnail"`
+	VideoID       string `json:"video_id"`
+	URL           string `json:"url"`
+	ClientIP      string `json:"client_ip"`
+	LocalFilePath string `json:"local_file_path,omitempty"`
 }
+
+const MaxSongsPerClient = 3
 
 func New(filename string) *Queue {
 	q := &Queue{
@@ -62,9 +67,14 @@ func (q *Queue) Save() {
 	}
 }
 
-func (q *Queue) Add(item ytmusic.SearchResult) {
+func (q *Queue) Add(item ytmusic.SearchResult, clientIP string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
+	count := q.countClientSongsLocked(clientIP, true)
+	if count >= MaxSongsPerClient {
+		return fmt.Errorf("client limit exceeded")
+	}
 
 	qi := QueueItem{
 		ID:        item.VideoID,
@@ -75,9 +85,31 @@ func (q *Queue) Add(item ytmusic.SearchResult) {
 		Thumbnail: item.Thumbnail,
 		VideoID:   item.VideoID,
 		URL:       item.URL,
+		ClientIP:  clientIP,
 	}
 	q.Items = append(q.Items, qi)
 	q.Save()
+	return nil
+}
+
+func (q *Queue) CountClientSongs(clientIP string, excludeCurrent bool) int {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	return q.countClientSongsLocked(clientIP, excludeCurrent)
+}
+
+func (q *Queue) countClientSongsLocked(clientIP string, excludeCurrent bool) int {
+	count := 0
+	currentIndex := q.Current
+	for i, item := range q.Items {
+		if item.ClientIP == clientIP {
+			if excludeCurrent && i == currentIndex {
+				continue
+			}
+			count++
+		}
+	}
+	return count
 }
 
 func (q *Queue) Remove(index int) {
@@ -169,11 +201,9 @@ func (q *Queue) Clear() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	log.Printf("DEBUG: Queue.Clear called - clearing %d items, current index: %d\n", len(q.Items), q.Current)
 	q.Items = make([]QueueItem, 0)
 	q.Current = -1
 	q.Save()
-	log.Printf("DEBUG: Queue.Clear completed - items: %d, current index: %d\n", len(q.Items), q.Current)
 }
 
 func (q *Queue) GetCurrentIndex() int {
@@ -206,5 +236,18 @@ func (q *Queue) Move(from, to int) {
 		q.Current++
 	}
 
+	q.Save()
+}
+
+func (q *Queue) UpdateLocalPath(videoID string, localPath string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	for i := range q.Items {
+		if q.Items[i].VideoID == videoID {
+			q.Items[i].LocalFilePath = localPath
+			break
+		}
+	}
 	q.Save()
 }

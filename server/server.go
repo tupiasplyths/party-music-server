@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -94,25 +95,24 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	s.clientsMu.Lock()
 	s.clients[conn] = true
-	clientCount := len(s.clients)
 	s.clientsMu.Unlock()
 
-	log.Printf("DEBUG: WebSocket client connected, total clients: %d\n", clientCount)
 
-	state := s.player.GetState()
-	log.Printf("DEBUG: About to send initial state - Queue length: %d\n", len(state.Queue))
+	clientIP := r.RemoteAddr
+	if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
+		clientIP = clientIP[:idx]
+	}
+
+	state := s.player.GetStateForClient(clientIP)
 	if err := conn.WriteJSON(state); err != nil {
 		log.Printf("ERROR: Failed to send initial state to WebSocket client: %v\n", err)
 	}
-	log.Printf("DEBUG: Finished sending initial state\n")
 
 	defer func() {
 		s.clientsMu.Lock()
 		delete(s.clients, conn)
-		clientCount = len(s.clients)
 		s.clientsMu.Unlock()
 		conn.Close()
-		log.Printf("DEBUG: WebSocket client disconnected, total clients: %d\n", clientCount)
 	}()
 
 	ticker := time.NewTicker(30 * time.Second)
@@ -166,16 +166,22 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleQueueAdd(w http.ResponseWriter, r *http.Request) {
-	log.Println("DEBUG: handleQueueAdd called")
 	var result ytmusic.SearchResult
 	if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
-		log.Println("DEBUG: handleQueueAdd - decode error:", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("DEBUG: handleQueueAdd - Adding song: %s\n", result.Title)
-	s.player.AddToQueue(result)
+	clientIP := r.RemoteAddr
+	if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
+		clientIP = clientIP[:idx]
+	}
+
+	err := s.player.AddToQueue(result, clientIP)
+	if err != nil {
+		http.Error(w, "You have reached your maximum of 3 songs in the queue. Wait for some to finish before adding more.", http.StatusTooManyRequests)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -272,7 +278,11 @@ func (s *Server) handleVolume(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(s.player.GetState())
+	clientIP := r.RemoteAddr
+	if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
+		clientIP = clientIP[:idx]
+	}
+	json.NewEncoder(w).Encode(s.player.GetStateForClient(clientIP))
 }
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {

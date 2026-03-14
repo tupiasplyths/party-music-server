@@ -9,24 +9,27 @@ import (
 	"os/exec"
 	"sync"
 
+	"musicbot/cache"
 	"musicbot/queue"
 	"musicbot/ytmusic"
 )
 
 type Player struct {
-	mu          sync.RWMutex
-	queue       *queue.Queue
-	ytClient    *ytmusic.Client
-	state       PlaybackState
-	volume      int
-	device      string
-	currentItem *queue.QueueItem
-	currentCmd  *exec.Cmd
-	broadcast   func(interface{})
-	ctx         context.Context
-	cancel      context.CancelFunc
-	ytDlpPath   string
-	ffplayPath  string
+	mu           sync.RWMutex
+	queue        *queue.Queue
+	cache        *cache.Cache
+	ytClient     *ytmusic.Client
+	state        PlaybackState
+	volume       int
+	device       string
+	currentItem  *queue.QueueItem
+	currentCmd   *exec.Cmd
+	broadcast    func(interface{})
+	ctx          context.Context
+	cancel       context.CancelFunc
+	ytDlpPath    string
+	ffplayPath   string
+	preloadCount int
 }
 
 type PlaybackState string
@@ -37,17 +40,19 @@ const (
 	StatePaused  PlaybackState = "paused"
 )
 
-func New(q *queue.Queue, volume int, device string, ytDlpPath, ffplayPath string) *Player {
+func New(q *queue.Queue, c *cache.Cache, volume int, device string, ytDlpPath, ffplayPath string, preloadCount int) *Player {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &Player{
-		queue:      q,
-		volume:     volume,
-		device:     device,
-		state:      StateStopped,
-		ctx:        ctx,
-		cancel:     cancel,
-		ytDlpPath:  ytDlpPath,
-		ffplayPath: ffplayPath,
+		queue:        q,
+		cache:        c,
+		volume:       volume,
+		device:       device,
+		state:        StateStopped,
+		ctx:          ctx,
+		cancel:       cancel,
+		ytDlpPath:    ytDlpPath,
+		ffplayPath:   ffplayPath,
+		preloadCount: preloadCount,
 	}
 	p.ytClient = ytmusic.New(ytDlpPath)
 
@@ -61,27 +66,36 @@ func (p *Player) SetBroadcast(fn func(interface{})) {
 func (p *Player) broadcastState() {
 	if p.broadcast != nil {
 		state := p.GetState()
-		log.Printf("DEBUG: Broadcasting state - Queue length: %d, Current: %v\n", len(state.Queue), state.Current)
-		log.Println("DEBUG: About to broadcast to all clients")
 		p.broadcast(state)
-		log.Println("DEBUG: Broadcast completed")
 	}
 }
 
 func (p *Player) GetState() PlayerState {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.getStateLocked()
+	return p.getStateLocked("")
 }
 
-func (p *Player) getStateLocked() PlayerState {
+func (p *Player) GetStateForClient(clientIP string) PlayerState {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.getStateLocked(clientIP)
+}
+
+func (p *Player) getStateLocked(clientIP string) PlayerState {
 	queueItems := p.queue.GetAll()
 	currentIndex := p.queue.GetCurrentIndex()
 
 	state := PlayerState{
-		State:        p.state,
-		Volume:       p.volume,
-		CurrentIndex: currentIndex,
+		State:            p.state,
+		Volume:           p.volume,
+		CurrentIndex:     currentIndex,
+		QueueLimit:       queue.MaxSongsPerClient,
+		ClientQueueCount: 0,
+	}
+
+	if clientIP != "" {
+		state.ClientQueueCount = p.queue.CountClientSongs(clientIP, true)
 	}
 
 	if p.currentItem != nil {
@@ -110,11 +124,13 @@ func (p *Player) getStateLocked() PlayerState {
 }
 
 type PlayerState struct {
-	State        PlaybackState     `json:"state"`
-	Volume       int               `json:"volume"`
-	Current      *NowPlaying       `json:"current,omitempty"`
-	Queue        []queue.QueueItem `json:"queue"`
-	CurrentIndex int               `json:"current_index"`
+	State            PlaybackState     `json:"state"`
+	Volume           int               `json:"volume"`
+	Current          *NowPlaying       `json:"current,omitempty"`
+	Queue            []queue.QueueItem `json:"queue"`
+	CurrentIndex     int               `json:"current_index"`
+	QueueLimit       int               `json:"queue_limit"`
+	ClientQueueCount int               `json:"client_queue_count"`
 }
 
 type NowPlaying struct {
@@ -149,18 +165,43 @@ func (p *Player) playLocked() error {
 
 func (p *Player) playItem(item *queue.QueueItem) error {
 	go func() {
-		streamURL, err := p.ytClient.GetStreamURL(item.VideoID)
-		if err != nil {
-			log.Printf("Failed to get stream URL: %v", err)
-			return
+		var audioSource string
+		var useLocalFile bool
+
+		if item.LocalFilePath != "" {
+			if cachedPath, ok := p.cache.GetCachedFile(item.VideoID); ok {
+				log.Printf("Using cached file: %s", cachedPath)
+				audioSource = cachedPath
+				useLocalFile = true
+			}
 		}
+
+		if !useLocalFile {
+			log.Printf("Downloading song: %s", item.Title)
+			downloadedPath, err := p.cache.DownloadSong(item.VideoID)
+			if err == nil {
+				log.Printf("Downloaded song: %s -> %s", item.Title, downloadedPath)
+				audioSource = downloadedPath
+				useLocalFile = true
+				p.queue.UpdateLocalPath(item.VideoID, downloadedPath)
+			} else {
+				log.Printf("Failed to download, falling back to stream: %s (error: %v)", item.Title, err)
+				streamURL, streamErr := p.ytClient.GetStreamURL(item.VideoID)
+				if streamErr != nil {
+					log.Printf("Failed to get stream URL: %v", streamErr)
+					return
+				}
+				audioSource = streamURL
+			}
+		}
+
+		go p.preloadNextSongs()
 
 		p.mu.Lock()
 		if p.currentCmd != nil && p.currentCmd.Process != nil {
 			if killErr := p.currentCmd.Process.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
 				log.Printf("Failed to kill existing process: %v", killErr)
 			}
-			// Wait for the process to ensure proper cleanup
 			if waitErr := p.currentCmd.Wait(); waitErr != nil && !errors.Is(waitErr, os.ErrProcessDone) {
 				log.Printf("Error waiting for killed process: %v", waitErr)
 			}
@@ -169,7 +210,7 @@ func (p *Player) playItem(item *queue.QueueItem) error {
 		ffplay := p.ffplayPath
 
 		args := []string{
-			"-i", streamURL,
+			"-i", audioSource,
 			"-nodisp",
 			"-autoexit",
 			"-volume", fmt.Sprintf("%d", p.volume),
@@ -179,7 +220,7 @@ func (p *Player) playItem(item *queue.QueueItem) error {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
-		err = cmd.Start()
+		err := cmd.Start()
 		if err != nil {
 			log.Printf("Failed to start player: %v", err)
 			p.mu.Unlock()
@@ -192,25 +233,51 @@ func (p *Player) playItem(item *queue.QueueItem) error {
 
 		p.broadcastState()
 
-		go func() {
-			_ = cmd.Wait()
+		currentVideoID := item.VideoID
+		shouldDeleteCache := useLocalFile
+
+		go func(runningCmd *exec.Cmd, playedItem *queue.QueueItem, retryCount int) {
+			err := runningCmd.Wait()
+
 			p.mu.Lock()
-			wasPlaying := p.state == StatePlaying
-			state := p.state
-			currentItem := p.currentItem
+			if p.currentCmd != runningCmd {
+				p.mu.Unlock()
+				return
+			}
+
 			p.currentCmd = nil
 			p.state = StateStopped
 			p.mu.Unlock()
 			p.broadcastState()
 
-			if wasPlaying && currentItem != nil && state == StatePlaying {
-				log.Printf("Playback interrupted, retrying: %s", currentItem.Title)
-				p.playItem(currentItem)
+			if err == nil {
+				p.queue.Remove(p.queue.GetCurrentIndex())
+				if shouldDeleteCache {
+					log.Printf("Deleting cached file for: %s", currentVideoID)
+					p.cache.Remove(currentVideoID)
+				}
+				p.Next()
+			} else {
+				if retryCount < 3 {
+					log.Printf("Playback failed (attempt %d/3), retrying: %s (error: %v)", retryCount+1, playedItem.Title, err)
+					p.playItemWithRetry(playedItem, retryCount+1)
+				} else {
+					log.Printf("Playback failed after 3 attempts, skipping: %s (error: %v)", playedItem.Title, err)
+					p.queue.Remove(p.queue.GetCurrentIndex())
+					if shouldDeleteCache {
+						p.cache.Remove(currentVideoID)
+					}
+					p.Next()
+				}
 			}
-		}()
+		}(cmd, item, 0)
 	}()
 
 	return nil
+}
+
+func (p *Player) playItemWithRetry(item *queue.QueueItem, retryCount int) error {
+	return p.playItem(item)
 }
 
 func (p *Player) stopCurrentProcess() {
@@ -310,7 +377,6 @@ func (p *Player) Previous() error {
 }
 
 func (p *Player) SetVolume(vol int) error {
-	p.mu.Lock()
 	if vol < 0 {
 		vol = 0
 	}
@@ -318,6 +384,7 @@ func (p *Player) SetVolume(vol int) error {
 		vol = 100
 	}
 
+	p.mu.Lock()
 	p.volume = vol
 	p.mu.Unlock()
 
@@ -339,22 +406,41 @@ func (p *Player) PlayIndex(index int) error {
 	return p.playItem(item)
 }
 
-func (p *Player) AddToQueue(result ytmusic.SearchResult) {
-	log.Printf("DEBUG: AddToQueue called - Title: %s, VideoID: %s\n", result.Title, result.VideoID)
-	p.queue.Add(result)
-	log.Println("DEBUG: AddToQueue - Item added to queue, calling broadcastState")
+func (p *Player) AddToQueue(result ytmusic.SearchResult, clientIP string) error {
+	err := p.queue.Add(result, clientIP)
+	if err != nil {
+		p.broadcastState()
+		return err
+	}
 	p.broadcastState()
+	return nil
 }
 
 func (p *Player) RemoveFromQueue(index int) {
-	p.queue.Remove(index)
+	if index == p.queue.GetCurrentIndex() {
+		p.stopCurrentProcess()
+		p.queue.Remove(index)
+
+		item := p.queue.Next()
+		if item == nil {
+			p.mu.Lock()
+			p.state = StateStopped
+			p.currentItem = nil
+			p.mu.Unlock()
+		} else {
+			p.mu.Lock()
+			p.currentItem = item
+			p.mu.Unlock()
+			p.playItem(item)
+		}
+	} else {
+		p.queue.Remove(index)
+	}
 	p.broadcastState()
 }
 
 func (p *Player) ClearQueue() {
-	log.Println("DEBUG: ClearQueue called")
 	p.queue.Clear()
-	log.Println("DEBUG: Queue cleared, broadcasting state")
 	p.mu.Lock()
 	if p.currentItem != nil {
 		p.currentItem = nil
@@ -384,4 +470,42 @@ func (p *Player) GetYtClient() *ytmusic.Client {
 
 func (p *Player) Context() context.Context {
 	return p.ctx
+}
+
+func (p *Player) preloadNextSongs() {
+	if p.cache == nil || p.preloadCount <= 0 {
+		return
+	}
+
+	allItems := p.queue.GetAll()
+	currentIdx := p.queue.GetCurrentIndex()
+
+	startIdx := currentIdx + 1
+	endIdx := startIdx + p.preloadCount
+	if endIdx > len(allItems) {
+		endIdx = len(allItems)
+	}
+
+	for i := startIdx; i < endIdx; i++ {
+		item := allItems[i]
+		if item.VideoID == "" {
+			continue
+		}
+
+		if cachedPath, ok := p.cache.GetCachedFile(item.VideoID); ok {
+			log.Printf("Song already cached: %s -> %s", item.Title, cachedPath)
+			p.queue.UpdateLocalPath(item.VideoID, cachedPath)
+			continue
+		}
+
+		log.Printf("Preloading song: %s (videoID: %s)", item.Title, item.VideoID)
+		downloadedPath, err := p.cache.DownloadSong(item.VideoID)
+		if err != nil {
+			log.Printf("Failed to preload song: %s - %v", item.Title, err)
+			continue
+		}
+
+		log.Printf("Preloaded song: %s -> %s", item.Title, downloadedPath)
+		p.queue.UpdateLocalPath(item.VideoID, downloadedPath)
+	}
 }

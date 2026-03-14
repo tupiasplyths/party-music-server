@@ -21,6 +21,8 @@ type MusicConfig struct {
 	Volume       int    `yaml:"volume"`
 	YtDlpPath    string `yaml:"yt_dlp_path"`
 	FfplayPath   string `yaml:"ffplay_path"`
+	CacheDir     string `yaml:"cache_dir"`
+	PreloadCount int    `yaml:"preload_count"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -47,6 +49,12 @@ func LoadConfig(path string) (*Config, error) {
 		} else {
 			cfg.Music.FfplayPath = "./ffplay"
 		}
+	}
+	if cfg.Music.CacheDir == "" {
+		cfg.Music.CacheDir = "./cache"
+	}
+	if cfg.Music.PreloadCount <= 0 {
+		cfg.Music.PreloadCount = 3
 	}
 
 	return &cfg, nil

@@ -5,3 +5,5 @@ server:
 music:
   output_device: "default"  # ALSA device, use "default" for system default
   volume: 80
+  cache_dir: "./cache"      # Directory to store downloaded songs
+  preload_count: 3          # Number of songs to preload ahead

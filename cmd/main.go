@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"musicbot/cache"
 	"musicbot/player"
 	"musicbot/queue"
 	"musicbot/server"
@@ -16,7 +17,6 @@ import (
 func main() {
 	cfg, err := server.LoadConfig("config.yaml")
 	if err != nil {
-		log.Println("Using default config:", err)
 		cfg = &server.Config{
 			Server: server.ServerConfig{
 				Host: "0.0.0.0",
@@ -30,13 +30,16 @@ func main() {
 	}
 
 	q := queue.New("queue.json")
-	p := player.New(q, cfg.Music.Volume, cfg.Music.OutputDevice, cfg.Music.YtDlpPath, cfg.Music.FfplayPath)
+	c := cache.New(cfg.Music.CacheDir, cfg.Music.YtDlpPath)
+	go func() {
+		c.CleanupOldFiles()
+	}()
+	p := player.New(q, c, cfg.Music.Volume, cfg.Music.OutputDevice, cfg.Music.YtDlpPath, cfg.Music.FfplayPath, cfg.Music.PreloadCount)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	s := server.New(addr, p)
 
 	go func() {
-		log.Printf("Starting server on %s", addr)
 		if err := s.Start(); err != nil {
 			log.Printf("Server error: %v", err)
 		}
@@ -60,7 +63,6 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
-	log.Println("Shutting down...")
 	p.Shutdown()
 	s.Stop()
 }
