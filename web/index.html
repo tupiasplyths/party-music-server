@@ -691,6 +691,13 @@
         let state = null;
         let visualizerInterval = null;
 
+        function formatTime(seconds) {
+            if (!seconds || seconds <= 0) return '0:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
@@ -745,8 +752,22 @@
                     <div class="artist">${state.current.artist}</div>
                 `;
                 
-                progressBar.style.display = 'block';
-                timeInfo.style.display = 'flex';
+                const currentTime = state.current.position || state.current.current_time || 0;
+                const duration = state.current.duration || 0;
+                
+                if (duration > 0) {
+                    progressBar.style.display = 'block';
+                    timeInfo.style.display = 'flex';
+                    
+                    const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+                    document.getElementById('progress').style.width = `${progressPercent}%`;
+                    document.getElementById('currentTime').textContent = formatTime(currentTime);
+                    document.getElementById('duration').textContent = formatTime(duration);
+                } else {
+                    progressBar.style.display = 'none';
+                    timeInfo.style.display = 'none';
+                }
+                
                 visualizer.style.display = 'flex';
                 
                 if (state.state === 'playing') {
