@@ -32,6 +32,10 @@ type QueueItem struct {
 
 const MaxSongsPerClient = 3
 
+func isPrivilegedIP(ip string) bool {
+	return ip == "192.168.1.144" || ip == "127.0.0.1" || ip == "::1" || ip == "localhost"
+}
+
 func New(filename string) *Queue {
 	q := &Queue{
 		Filename: filename,
@@ -71,9 +75,11 @@ func (q *Queue) Add(item ytmusic.SearchResult, clientIP string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	count := q.countClientSongsLocked(clientIP, true)
-	if count >= MaxSongsPerClient {
-		return fmt.Errorf("client limit exceeded")
+	if !isPrivilegedIP(clientIP) {
+		count := q.countClientSongsLocked(clientIP, true)
+		if count >= MaxSongsPerClient {
+			return fmt.Errorf("client limit exceeded")
+		}
 	}
 
 	qi := QueueItem{

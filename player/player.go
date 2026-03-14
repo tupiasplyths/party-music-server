@@ -100,19 +100,21 @@ func (p *Player) getStateLocked(clientIP string) PlayerState {
 
 	if p.currentItem != nil {
 		state.Current = &NowPlaying{
-			Title:     p.currentItem.Title,
-			Artist:    p.currentItem.Artist,
-			Thumbnail: p.currentItem.Thumbnail,
-			Duration:  p.currentItem.Duration,
+			Title:       p.currentItem.Title,
+			Artist:      p.currentItem.Artist,
+			Thumbnail:   p.currentItem.Thumbnail,
+			Duration:    p.currentItem.Duration,
+			CurrentTime: 0,
 		}
 	} else {
 		queueCurrent := p.queue.GetCurrent()
 		if queueCurrent != nil {
 			state.Current = &NowPlaying{
-				Title:     queueCurrent.Title,
-				Artist:    queueCurrent.Artist,
-				Thumbnail: queueCurrent.Thumbnail,
-				Duration:  queueCurrent.Duration,
+				Title:       queueCurrent.Title,
+				Artist:      queueCurrent.Artist,
+				Thumbnail:   queueCurrent.Thumbnail,
+				Duration:    queueCurrent.Duration,
+				CurrentTime: 0,
 			}
 		}
 	}
@@ -134,10 +136,11 @@ type PlayerState struct {
 }
 
 type NowPlaying struct {
-	Title     string `json:"title"`
-	Artist    string `json:"artist"`
-	Thumbnail string `json:"thumbnail"`
-	Duration  int    `json:"duration"`
+	Title       string `json:"title"`
+	Artist      string `json:"artist"`
+	Thumbnail   string `json:"thumbnail"`
+	Duration    int    `json:"duration"`
+	CurrentTime int    `json:"current_time"`
 }
 
 func (p *Player) Play() error {
