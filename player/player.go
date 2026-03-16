@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"musicbot/cache"
 	"musicbot/queue"
@@ -465,6 +466,25 @@ func (p *Player) MoveQueueItem(from, to int) {
 func (p *Player) Shutdown() {
 	p.cancel()
 	p.Stop()
+}
+
+func (p *Player) ShutdownWithTimeout(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	done := make(chan struct{})
+
+	go func() {
+		p.Shutdown()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (p *Player) GetYtClient() *ytmusic.Client {
