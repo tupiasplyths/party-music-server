@@ -28,7 +28,7 @@ A server that plays music from YouTube Music, controllable from any device on yo
 
 2. Download this source code:
    ```powershell
-   git clone <your-repo-url>
+   git clone https://github.com/tupiasplyths/party-music-server.git
    cd music_bot
    ```
 
