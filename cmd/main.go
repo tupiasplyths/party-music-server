@@ -39,7 +39,7 @@ func main() {
 	p := player.New(q, c, cfg.Music.Volume, cfg.Music.OutputDevice, cfg.Music.YtDlpPath, cfg.Music.FfplayPath, cfg.Music.PreloadCount)
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	s := server.New(addr, p)
+	s := server.New(addr, p, cfg.Admin.Password)
 
 	go func() {
 		if err := s.Start(); err != nil {

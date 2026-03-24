@@ -16,18 +16,25 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type ClientInfo struct {
+	IP        string    `json:"ip"`
+	Connected time.Time `json:"connected"`
+}
+
 type Server struct {
 	httpServer *http.Server
 	player     *player.Player
 	upgrader   websocket.Upgrader
-	clients    map[*websocket.Conn]bool
+	clients    map[*websocket.Conn]ClientInfo
 	clientsMu  sync.RWMutex
+	adminPass  string
 }
 
-func New(addr string, p *player.Player) *Server {
+func New(addr string, p *player.Player, adminPass string) *Server {
 	s := &Server{
-		player:  p,
-		clients: make(map[*websocket.Conn]bool),
+		player:    p,
+		clients:   make(map[*websocket.Conn]ClientInfo),
+		adminPass: adminPass,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
@@ -48,6 +55,10 @@ func New(addr string, p *player.Player) *Server {
 	mux.HandleFunc("/api/player/prev", s.handlePrev)
 	mux.HandleFunc("/api/player/volume", s.handleVolume)
 	mux.HandleFunc("/api/player/state", s.handleState)
+	mux.HandleFunc("/api/admin/clients", s.authMiddleware(s.handleAdminClients))
+	mux.HandleFunc("/api/admin/devices", s.authMiddleware(s.handleAdminDevices))
+	mux.HandleFunc("/api/admin/device", s.authMiddleware(s.handleAdminSetDevice))
+	mux.HandleFunc("/admin", s.authMiddleware(s.handleAdminPanel))
 	mux.HandleFunc("/", s.handleStatic)
 
 	s.httpServer = &http.Server{
@@ -95,13 +106,15 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	})
 
 	s.clientsMu.Lock()
-	s.clients[conn] = true
-	s.clientsMu.Unlock()
-
 	clientIP := r.RemoteAddr
 	if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
 		clientIP = clientIP[:idx]
 	}
+	s.clients[conn] = ClientInfo{
+		IP:        clientIP,
+		Connected: time.Now(),
+	}
+	s.clientsMu.Unlock()
 
 	state := s.player.GetStateForClient(clientIP)
 	if err := conn.WriteJSON(state); err != nil {
@@ -315,4 +328,69 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	log.Println("Server shutdown complete")
 	return nil
+}
+
+func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.adminPass == "" {
+			next(w, r)
+			return
+		}
+
+		auth := r.Header.Get("Authorization")
+		if strings.HasPrefix(auth, "Bearer ") {
+			token := strings.TrimPrefix(auth, "Bearer ")
+			if token == s.adminPass {
+				next(w, r)
+				return
+			}
+		}
+
+		queryPass := r.URL.Query().Get("password")
+		if queryPass == s.adminPass {
+			next(w, r)
+			return
+		}
+
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	}
+}
+
+func (s *Server) handleAdminClients(w http.ResponseWriter, r *http.Request) {
+	s.clientsMu.RLock()
+	defer s.clientsMu.RUnlock()
+
+	clients := make([]ClientInfo, 0, len(s.clients))
+	for _, info := range s.clients {
+		clients = append(clients, info)
+	}
+
+	json.NewEncoder(w).Encode(clients)
+}
+
+func (s *Server) handleAdminDevices(w http.ResponseWriter, r *http.Request) {
+	devices := s.player.GetAvailableDevices()
+	json.NewEncoder(w).Encode(devices)
+}
+
+func (s *Server) handleAdminSetDevice(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Device string `json:"device"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.player.SetDevice(req.Device)
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleAdminPanel(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "web/admin.html")
 }

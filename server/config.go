@@ -9,6 +9,7 @@ import (
 type Config struct {
 	Server ServerConfig `yaml:"server"`
 	Music  MusicConfig  `yaml:"music"`
+	Admin  AdminConfig  `yaml:"admin"`
 }
 
 type ServerConfig struct {
@@ -23,6 +24,10 @@ type MusicConfig struct {
 	FfplayPath   string `yaml:"ffplay_path"`
 	CacheDir     string `yaml:"cache_dir"`
 	PreloadCount int    `yaml:"preload_count"`
+}
+
+type AdminConfig struct {
+	Password string `yaml:"password"`
 }
 
 func LoadConfig(path string) (*Config, error) {
