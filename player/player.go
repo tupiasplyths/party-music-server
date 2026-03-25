@@ -532,3 +532,24 @@ func (p *Player) preloadNextSongs() {
 		p.queue.UpdateLocalPath(item.VideoID, downloadedPath)
 	}
 }
+
+func (p *Player) SetDevice(device string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.device = device
+}
+
+func (p *Player) GetDevice() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.device
+}
+
+func (p *Player) GetAvailableDevices() []string {
+	return []string{
+		"default",
+		"speakers",
+		"headphones",
+		"voicemeeter",
+	}
+}

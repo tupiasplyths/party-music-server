@@ -2,8 +2,11 @@ server:
   host: "0.0.0.0"
   port: 8080
 
+admin:
+  password: "changeme"
+
 music:
-  output_device: "default"  # ALSA device, use "default" for system default
+  output_device: "default"
   volume: 80
-  cache_dir: "./cache"      # Directory to store downloaded songs
-  preload_count: 3          # Number of songs to preload ahead
+  cache_dir: "./cache"
+  preload_count: 3

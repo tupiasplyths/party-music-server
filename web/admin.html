@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Music Bot</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+            color: #eee;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+        
+        .login-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .login-box {
+            background: rgba(22, 33, 62, 0.8);
+            padding: 40px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 217, 255, 0.15);
+            max-width: 400px;
+            width: 100%;
+        }
+        
+        .login-box h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.8rem;
+            background: linear-gradient(135deg, #00d9ff 0%, #00b8d4 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .login-box input {
+            width: 100%;
+            padding: 14px 18px;
+            border: none;
+            border-radius: 12px;
+            background: rgba(26, 26, 46, 0.8);
+            color: #fff;
+            font-size: 16px;
+            margin-bottom: 20px;
+            outline: none;
+        }
+        
+        .login-box input:focus {
+            box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.3);
+        }
+        
+        .login-box button {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #00d9ff 0%, #00b8d4 100%);
+            color: #1a1a2e;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .login-box button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 217, 255, 0.4);
+        }
+        
+        .login-error {
+            color: #ff4444;
+            text-align: center;
+            margin-bottom: 15px;
+            display: none;
+        }
+        
+        .container {
+            display: none;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #00d9ff 0%, #00b8d4 50%, #0097a7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .logout-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 10px;
+            background: rgba(255, 68, 68, 0.2);
+            color: #ff4444;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255, 68, 68, 0.3);
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .panel {
+            background: rgba(22, 33, 62, 0.6);
+            border-radius: 16px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 217, 255, 0.1);
+        }
+        
+        .panel h2 {
+            color: #00d9ff;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(0, 217, 255, 0.1);
+        }
+        
+        .client-list {
+            list-style: none;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .client-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: rgba(26, 26, 46, 0.5);
+        }
+        
+        .client-item .ip {
+            font-family: monospace;
+            color: #00d9ff;
+        }
+        
+        .client-item .time {
+            color: #888;
+            font-size: 12px;
+        }
+        
+        .device-select {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 10px;
+            background: rgba(26, 26, 46, 0.8);
+            color: #fff;
+            font-size: 14px;
+            margin-bottom: 15px;
+            cursor: pointer;
+        }
+        
+        .volume-control {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .volume-control input[type="range"] {
+            flex: 1;
+            height: 6px;
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            outline: none;
+        }
+        
+        .volume-control input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            background: linear-gradient(135deg, #00d9ff 0%, #00b8d4 100%);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .controls button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 10px;
+            background: rgba(22, 33, 62, 0.8);
+            color: #fff;
+            cursor: pointer;
+            font-size: 18px;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(0, 217, 255, 0.1);
+        }
+        
+        .controls button:hover {
+            background: rgba(0, 217, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        
+        .controls button.primary {
+            background: linear-gradient(135deg, #00d9ff 0%, #00b8d4 100%);
+            color: #1a1a2e;
+            border: none;
+        }
+        
+        .queue-panel {
+            grid-column: 1 / -1;
+        }
+        
+        .queue-list {
+            list-style: none;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .queue-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: rgba(26, 26, 46, 0.5);
+            transition: all 0.3s ease;
+        }
+        
+        .queue-item:hover {
+            background: rgba(0, 217, 255, 0.1);
+        }
+        
+        .queue-item.playing {
+            background: linear-gradient(90deg, rgba(0, 217, 255, 0.15) 0%, rgba(0, 184, 212, 0.1) 100%);
+            border-left: 3px solid #00d9ff;
+        }
+        
+        .queue-item .index {
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #888;
+        }
+        
+        .queue-item.playing .index {
+            background: linear-gradient(135deg, #00d9ff 0%, #00b8d4 100%);
+            color: #1a1a2e;
+        }
+        
+        .queue-item .thumbnail {
+            width: 40px;
+            height: 40px;
+            border-radius: 6px;
+            background: #16213e;
+            overflow: hidden;
+        }
+        
+        .queue-item .thumbnail img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .queue-item .info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .queue-item .title {
+            font-weight: 600;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .queue-item .artist {
+            color: #888;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .queue-item .remove {
+            background: none;
+            border: none;
+            color: #ff4444;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 6px;
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+        
+        .queue-item:hover .remove {
+            opacity: 1;
+        }
+        
+        .queue-item .remove:hover {
+            background: rgba(255, 68, 68, 0.2);
+        }
+        
+        .empty-message {
+            text-align: center;
+            padding: 30px;
+            color: #666;
+            font-style: italic;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-badge.playing {
+            background: rgba(0, 217, 255, 0.2);
+            color: #00d9ff;
+        }
+        
+        .status-badge.paused {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+        }
+        
+        .status-badge.stopped {
+            background: rgba(255, 68, 68, 0.2);
+            color: #ff4444;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container" id="loginContainer">
+        <div class="login-box">
+            <h1>Admin Panel</h1>
+            <div class="login-error" id="loginError">Invalid password</div>
+            <input type="password" id="passwordInput" placeholder="Enter admin password" onkeypress="if(event.key==='Enter')login()">
+            <button onclick="login()">Login</button>
+        </div>
+    </div>
+    
+    <div class="container" id="adminContainer">
+        <div class="header">
+            <h1>Admin Panel</h1>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+        
+        <div class="grid">
+            <div class="panel">
+                <h2>Connected Clients <span id="clientCount"></span></h2>
+                <ul class="client-list" id="clientList">
+                    <li class="empty-message">No clients connected</li>
+                </ul>
+            </div>
+            
+            <div class="panel">
+                <h2>Output Device</h2>
+                <select class="device-select" id="deviceSelect" onchange="setDevice(this.value)">
+                    <option value="default">Default</option>
+                </select>
+                
+                <h2 style="margin-top: 20px;">Volume</h2>
+                <div class="volume-control">
+                    <span>🔊</span>
+                    <input type="range" id="volumeSlider" min="0" max="100" value="80" onchange="setVolume(this.value)">
+                    <span id="volumeValue">80%</span>
+                </div>
+                
+                <h2 style="margin-top: 20px;">Status: <span class="status-badge" id="statusBadge">Stopped</span></h2>
+                
+                <div class="controls" style="margin-top: 15px;">
+                    <button onclick="previous()" title="Previous">⏮</button>
+                    <button class="primary" onclick="togglePlay()" id="playPauseBtn" title="Play/Pause">▶</button>
+                    <button onclick="stop()" title="Stop">⏹</button>
+                    <button onclick="next()" title="Next">⏭</button>
+                </div>
+            </div>
+            
+            <div class="panel queue-panel">
+                <h2>Queue</h2>
+                <ul class="queue-list" id="queueList">
+                    <li class="empty-message">Queue is empty</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let password = '';
+        let ws = null;
+        let state = null;
+        
+        function getAuthHeaders() {
+            return {
+                'Authorization': 'Bearer ' + password
+            };
+        }
+        
+        function getAuthUrl(url) {
+            const sep = url.includes('?') ? '&' : '?';
+            return url + sep + 'password=' + encodeURIComponent(password);
+        }
+        
+        async function login() {
+            password = document.getElementById('passwordInput').value;
+            if (!password) return;
+            
+            try {
+                const res = await fetch(getAuthUrl('/api/admin/clients'));
+                if (res.ok) {
+                    localStorage.setItem('adminPassword', password);
+                    showAdmin();
+                } else {
+                    document.getElementById('loginError').style.display = 'block';
+                }
+            } catch (e) {
+                document.getElementById('loginError').style.display = 'block';
+            }
+        }
+        
+        function logout() {
+            localStorage.removeItem('adminPassword');
+            password = '';
+            if (ws) ws.close();
+            document.getElementById('loginContainer').style.display = 'flex';
+            document.getElementById('adminContainer').style.display = 'none';
+        }
+        
+        function showAdmin() {
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('adminContainer').style.display = 'block';
+            loadDevices();
+            loadClients();
+            connectWebSocket();
+        }
+        
+        async function loadDevices() {
+            try {
+                const res = await fetch(getAuthUrl('/api/admin/devices'));
+                const devices = await res.json();
+                const select = document.getElementById('deviceSelect');
+                select.innerHTML = devices.map(d => `<option value="${d}">${d}</option>`).join('');
+            } catch (e) {
+                console.error('Failed to load devices:', e);
+            }
+        }
+        
+        async function loadClients() {
+            try {
+                const res = await fetch(getAuthUrl('/api/admin/clients'));
+                const clients = await res.json();
+                const list = document.getElementById('clientList');
+                const count = document.getElementById('clientCount');
+                
+                count.textContent = `(${clients.length})`;
+                
+                if (clients.length === 0) {
+                    list.innerHTML = '<li class="empty-message">No clients connected</li>';
+                } else {
+                    list.innerHTML = clients.map(c => `
+                        <li class="client-item">
+                            <span class="ip">${c.ip || 'Unknown'}</span>
+                            <span class="time">${formatTime(c.connected)}</span>
+                        </li>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error('Failed to load clients:', e);
+            }
+        }
+        
+        function formatTime(dateStr) {
+            if (!dateStr) return 'Unknown';
+            const date = new Date(dateStr);
+            return date.toLocaleTimeString();
+        }
+        
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+            
+            ws.onmessage = (event) => {
+                try {
+                    state = JSON.parse(event.data);
+                    updateUI();
+                } catch (e) {
+                    console.error('Error parsing WebSocket message:', e);
+                }
+            };
+            
+            ws.onclose = () => {
+                setTimeout(connectWebSocket, 1000);
+            };
+        }
+        
+        function updateUI() {
+            if (!state) return;
+            
+            const volumeSlider = document.getElementById('volumeSlider');
+            volumeSlider.value = state.volume;
+            document.getElementById('volumeValue').textContent = state.volume + '%';
+            
+            const statusBadge = document.getElementById('statusBadge');
+            statusBadge.textContent = state.state;
+            statusBadge.className = 'status-badge ' + state.state;
+            
+            const playPauseBtn = document.getElementById('playPauseBtn');
+            playPauseBtn.textContent = state.state === 'playing' ? '⏸' : '▶';
+            
+            const queueList = document.getElementById('queueList');
+            if (!state.queue || state.queue.length === 0) {
+                queueList.innerHTML = '<li class="empty-message">Queue is empty</li>';
+            } else {
+                queueList.innerHTML = state.queue.map((item, index) => `
+                    <li class="queue-item ${index === state.current_index ? 'playing' : ''}">
+                        <div class="index">${index + 1}</div>
+                        <div class="thumbnail">
+                            ${item.thumbnail ? `<img src="${item.thumbnail}" alt="">` : ''}
+                        </div>
+                        <div class="info">
+                            <div class="title">${item.title}</div>
+                            <div class="artist">${item.artist}</div>
+                        </div>
+                        <button class="remove" onclick="removeFromQueue(${index})">✕</button>
+                    </li>
+                `).join('');
+            }
+        }
+        
+        async function setDevice(device) {
+            try {
+                await fetch('/api/admin/device', {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ device })
+                });
+            } catch (e) {
+                console.error('Failed to set device:', e);
+            }
+        }
+        
+        async function setVolume(vol) {
+            document.getElementById('volumeValue').textContent = vol + '%';
+            try {
+                await fetch(`/api/player/volume?volume=${vol}`, { method: 'POST' });
+            } catch (e) {
+                console.error('Failed to set volume:', e);
+            }
+        }
+        
+        async function togglePlay() {
+            try {
+                if (state?.state === 'playing') {
+                    await fetch('/api/player/pause', { method: 'POST' });
+                } else {
+                    await fetch('/api/player/play', { method: 'POST' });
+                }
+            } catch (e) {
+                console.error('Error toggling play:', e);
+            }
+        }
+        
+        async function stop() {
+            try {
+                await fetch('/api/player/stop', { method: 'POST' });
+            } catch (e) {
+                console.error('Error stopping:', e);
+            }
+        }
+        
+        async function next() {
+            try {
+                await fetch('/api/player/next', { method: 'POST' });
+            } catch (e) {
+                console.error('Error going to next:', e);
+            }
+        }
+        
+        async function previous() {
+            try {
+                await fetch('/api/player/prev', { method: 'POST' });
+            } catch (e) {
+                console.error('Error going to previous:', e);
+            }
+        }
+        
+        async function removeFromQueue(index) {
+            try {
+                await fetch(`/api/queue/remove?index=${index}`, { method: 'POST' });
+            } catch (e) {
+                console.error('Error removing from queue:', e);
+            }
+        }
+        
+        const savedPassword = localStorage.getItem('adminPassword');
+        if (savedPassword) {
+            password = savedPassword;
+            fetch(getAuthUrl('/api/admin/clients')).then(res => {
+                if (res.ok) showAdmin();
+            }).catch(() => {});
+        }
+        
+        setInterval(loadClients, 5000);
+    </script>
+</body>
+</html>
