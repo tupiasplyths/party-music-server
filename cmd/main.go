@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -63,6 +65,31 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
-	p.Shutdown()
-	s.Stop()
+	log.Println("Received shutdown signal, initiating graceful shutdown...")
+
+	shutdownTimeout := 30 * time.Second
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer shutdownCancel()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		log.Println("Shutting down player...")
+		if err := p.ShutdownWithTimeout(10 * time.Second); err != nil {
+			log.Printf("Player shutdown error: %v", err)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		log.Println("Shutting down server...")
+		if err := s.Shutdown(shutdownCtx); err != nil {
+			log.Printf("Server shutdown error: %v", err)
+		}
+	}()
+
+	wg.Wait()
+	log.Println("Graceful shutdown complete")
 }

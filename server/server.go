@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -96,7 +97,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.clientsMu.Lock()
 	s.clients[conn] = true
 	s.clientsMu.Unlock()
-
 
 	clientIP := r.RemoteAddr
 	if idx := strings.LastIndex(clientIP, ":"); idx != -1 {
@@ -295,4 +295,24 @@ func (s *Server) Start() error {
 
 func (s *Server) Stop() error {
 	return s.httpServer.Close()
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	log.Println("Shutting down server...")
+
+	s.clientsMu.Lock()
+	for conn := range s.clients {
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Server shutting down"))
+		conn.Close()
+		delete(s.clients, conn)
+	}
+	s.clientsMu.Unlock()
+
+	if err := s.httpServer.Shutdown(ctx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+		return err
+	}
+
+	log.Println("Server shutdown complete")
+	return nil
 }
