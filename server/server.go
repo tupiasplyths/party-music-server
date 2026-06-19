@@ -27,19 +27,31 @@ type Server struct {
 	upgrader   websocket.Upgrader
 	clients    map[*websocket.Conn]ClientInfo
 	clientsMu  sync.RWMutex
-	adminPass  string
+	sessions   *SessionManager
 }
 
-func New(addr string, p *player.Player, adminPass string) *Server {
+func New(addr string, p *player.Player, sessions *SessionManager) *Server {
 	s := &Server{
-		player:    p,
-		clients:   make(map[*websocket.Conn]ClientInfo),
-		adminPass: adminPass,
+		player:   p,
+		clients:  make(map[*websocket.Conn]ClientInfo),
+		sessions: sessions,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
 
+	mux := s.routes()
+	s.httpServer = &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	p.SetBroadcast(s.Broadcast)
+
+	return s
+}
+
+func (s *Server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/api/search", s.handleSearch)
@@ -55,20 +67,14 @@ func New(addr string, p *player.Player, adminPass string) *Server {
 	mux.HandleFunc("/api/player/prev", s.handlePrev)
 	mux.HandleFunc("/api/player/volume", s.handleVolume)
 	mux.HandleFunc("/api/player/state", s.handleState)
+	mux.HandleFunc("/api/admin/login", s.handleAdminLogin)
+	mux.HandleFunc("/api/admin/logout", s.authMiddleware(s.handleAdminLogout))
 	mux.HandleFunc("/api/admin/clients", s.authMiddleware(s.handleAdminClients))
 	mux.HandleFunc("/api/admin/devices", s.authMiddleware(s.handleAdminDevices))
 	mux.HandleFunc("/api/admin/device", s.authMiddleware(s.handleAdminSetDevice))
-	mux.HandleFunc("/admin", s.authMiddleware(s.handleAdminPanel))
+	mux.HandleFunc("/admin", s.handleAdminPanel)
 	mux.HandleFunc("/", s.handleStatic)
-
-	s.httpServer = &http.Server{
-		Addr:    addr,
-		Handler: mux,
-	}
-
-	p.SetBroadcast(s.Broadcast)
-
-	return s
+	return mux
 }
 
 func (s *Server) broadcast(msg interface{}) {
@@ -332,7 +338,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.adminPass == "" {
+		if s.sessions == nil {
 			next(w, r)
 			return
 		}
@@ -340,16 +346,10 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		auth := r.Header.Get("Authorization")
 		if strings.HasPrefix(auth, "Bearer ") {
 			token := strings.TrimPrefix(auth, "Bearer ")
-			if token == s.adminPass {
+			if s.sessions.Validate(token) {
 				next(w, r)
 				return
 			}
-		}
-
-		queryPass := r.URL.Query().Get("password")
-		if queryPass == s.adminPass {
-			next(w, r)
-			return
 		}
 
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -357,6 +357,10 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) handleAdminClients(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	s.clientsMu.RLock()
 	defer s.clientsMu.RUnlock()
 
@@ -365,11 +369,17 @@ func (s *Server) handleAdminClients(w http.ResponseWriter, r *http.Request) {
 		clients = append(clients, info)
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(clients)
 }
 
 func (s *Server) handleAdminDevices(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	devices := s.player.GetAvailableDevices()
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(devices)
 }
 
@@ -389,6 +399,56 @@ func (s *Server) handleAdminSetDevice(w http.ResponseWriter, r *http.Request) {
 
 	s.player.SetDevice(req.Device)
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.sessions == nil {
+		http.Error(w, "Authentication not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	token, expiry, ok := s.sessions.Authenticate(req.Password)
+	if !ok {
+		time.Sleep(50 * time.Millisecond)
+		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(struct {
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expires_at"`
+	}{Token: token, ExpiresAt: expiry.UTC().Format(time.RFC3339)})
+}
+
+func (s *Server) handleAdminLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.sessions == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	auth := r.Header.Get("Authorization")
+	if strings.HasPrefix(auth, "Bearer ") {
+		token := strings.TrimPrefix(auth, "Bearer ")
+		s.sessions.Invalidate(token)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleAdminPanel(w http.ResponseWriter, r *http.Request) {

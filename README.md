@@ -68,7 +68,21 @@ server:
 music:
   output_device: "default"  # Audio device
   volume: 80               # Default volume (0-100)
+
+admin:
+  password: "changeme"
+  session_ttl: 24h
 ```
+
+## Admin Authentication
+
+The admin panel (accessible at `/admin`) is password-protected:
+
+- The default password is `changeme` (change it in `config.yaml`).
+- Open `/admin` in your browser, enter the password, and a session token is returned.
+- The token is stored in `sessionStorage` (cleared when the tab is closed).
+- The token expires after `admin.session_ttl` (default 24 hours).
+- Clicking **Logout** invalidates the token immediately on the server.
 
 ## Usage
 

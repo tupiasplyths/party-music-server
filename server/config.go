@@ -2,6 +2,7 @@ package server
 
 import (
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -27,7 +28,8 @@ type MusicConfig struct {
 }
 
 type AdminConfig struct {
-	Password string `yaml:"password"`
+	Password   string        `yaml:"password"`
+	SessionTTL time.Duration `yaml:"session_ttl"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -60,6 +62,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Music.PreloadCount <= 0 {
 		cfg.Music.PreloadCount = 3
+	}
+	if cfg.Admin.SessionTTL <= 0 {
+		cfg.Admin.SessionTTL = 24 * time.Hour
 	}
 
 	return &cfg, nil

@@ -38,8 +38,11 @@ func main() {
 	}()
 	p := player.New(q, c, cfg.Music.Volume, cfg.Music.OutputDevice, cfg.Music.YtDlpPath, cfg.Music.FfplayPath, cfg.Music.PreloadCount)
 
+	sessions := server.NewSessionManager(cfg.Admin.Password, cfg.Admin.SessionTTL)
+	sessions.Start()
+
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	s := server.New(addr, p, cfg.Admin.Password)
+	s := server.New(addr, p, sessions)
 
 	go func() {
 		if err := s.Start(); err != nil {
@@ -72,7 +75,13 @@ func main() {
 	defer shutdownCancel()
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
+
+	go func() {
+		defer wg.Done()
+		log.Println("Shutting down sessions...")
+		sessions.Close()
+	}()
 
 	go func() {
 		defer wg.Done()

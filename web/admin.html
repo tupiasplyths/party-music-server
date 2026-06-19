@@ -440,68 +440,119 @@
     </div>
 
     <script>
-        let password = '';
+        let authToken = null;
         let ws = null;
         let state = null;
-        
-        function getAuthHeaders() {
-            return {
-                'Authorization': 'Bearer ' + password
-            };
+        let clientsInterval = null;
+        let loggedOut = false;
+        let loginInProgress = false;
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const el = document.createElement('span');
+            el.textContent = str;
+            return el.innerHTML;
         }
         
-        function getAuthUrl(url) {
-            const sep = url.includes('?') ? '&' : '?';
-            return url + sep + 'password=' + encodeURIComponent(password);
+        function getAuthHeaders() {
+            return { 'Authorization': 'Bearer ' + authToken };
+        }
+        
+        async function apiFetch(url, options = {}) {
+            if (!authToken) { forceLogout(); throw new Error('not authenticated'); }
+            const opts = {
+                ...options,
+                headers: { ...(options.headers || {}), ...getAuthHeaders() }
+            };
+            const res = await fetch(url, opts);
+            if (res.status === 401) {
+                document.getElementById('loginError').textContent = 'Session expired — please log in again.';
+                forceLogout();
+                throw new Error('unauthorized');
+            }
+            return res;
         }
         
         async function login() {
-            password = document.getElementById('passwordInput').value;
-            if (!password) return;
-            
+            if (loginInProgress) return;
+            const pw = document.getElementById('passwordInput').value;
+            if (!pw) return;
+            loginInProgress = true;
             try {
-                const res = await fetch(getAuthUrl('/api/admin/clients'));
+                const res = await fetch('/api/admin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: pw })
+                });
                 if (res.ok) {
-                    localStorage.setItem('adminPassword', password);
+                    const data = await res.json();
+                    authToken = data.token;
+                    sessionStorage.setItem('adminToken', authToken);
+                    document.getElementById('loginError').style.display = 'none';
+                    document.getElementById('passwordInput').value = '';
                     showAdmin();
                 } else {
+                    document.getElementById('loginError').textContent = 'Invalid password';
                     document.getElementById('loginError').style.display = 'block';
                 }
             } catch (e) {
-                document.getElementById('loginError').style.display = 'block';
+                const errorEl = document.getElementById('loginError');
+                errorEl.textContent = (e instanceof TypeError) ? 'Network error — check your connection' : 'Invalid password';
+                errorEl.style.display = 'block';
+            } finally {
+                loginInProgress = false;
             }
         }
         
-        function logout() {
-            localStorage.removeItem('adminPassword');
-            password = '';
-            if (ws) ws.close();
+        async function logout() {
+            try { await apiFetch('/api/admin/logout', { method: 'POST' }); } catch (e) {}
+            forceLogout();
+        }
+        
+        function forceLogout() {
+            loggedOut = true;
+            sessionStorage.removeItem('adminToken');
+            authToken = null;
+            state = null;
+            if (ws) { ws.close(); ws = null; }
+            if (clientsInterval) { clearInterval(clientsInterval); clientsInterval = null; }
+            document.getElementById('deviceSelect').innerHTML = '<option value="default">Default</option>';
+            document.getElementById('clientList').innerHTML = '<li class="empty-message">No clients connected</li>';
+            document.getElementById('clientCount').textContent = '';
+            document.getElementById('queueList').innerHTML = '<li class="empty-message">Queue is empty</li>';
+            document.getElementById('statusBadge').textContent = 'Stopped';
+            document.getElementById('statusBadge').className = 'status-badge stopped';
             document.getElementById('loginContainer').style.display = 'flex';
             document.getElementById('adminContainer').style.display = 'none';
         }
         
         function showAdmin() {
+            loggedOut = false;
             document.getElementById('loginContainer').style.display = 'none';
             document.getElementById('adminContainer').style.display = 'block';
             loadDevices();
             loadClients();
+            if (!clientsInterval) {
+                clientsInterval = setInterval(loadClients, 5000);
+            }
             connectWebSocket();
         }
         
         async function loadDevices() {
             try {
-                const res = await fetch(getAuthUrl('/api/admin/devices'));
+                const res = await apiFetch('/api/admin/devices');
                 const devices = await res.json();
                 const select = document.getElementById('deviceSelect');
-                select.innerHTML = devices.map(d => `<option value="${d}">${d}</option>`).join('');
+                select.innerHTML = devices.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
             } catch (e) {
                 console.error('Failed to load devices:', e);
             }
         }
         
         async function loadClients() {
+            if (!authToken) return;
             try {
-                const res = await fetch(getAuthUrl('/api/admin/clients'));
+                const res = await apiFetch('/api/admin/clients');
                 const clients = await res.json();
                 const list = document.getElementById('clientList');
                 const count = document.getElementById('clientCount');
@@ -513,7 +564,7 @@
                 } else {
                     list.innerHTML = clients.map(c => `
                         <li class="client-item">
-                            <span class="ip">${c.ip || 'Unknown'}</span>
+                            <span class="ip">${escapeHtml(c.ip || 'Unknown')}</span>
                             <span class="time">${formatTime(c.connected)}</span>
                         </li>
                     `).join('');
@@ -530,6 +581,7 @@
         }
         
         function connectWebSocket() {
+            if (loggedOut) return;
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
             
@@ -543,7 +595,9 @@
             };
             
             ws.onclose = () => {
-                setTimeout(connectWebSocket, 1000);
+                if (!loggedOut) {
+                    setTimeout(connectWebSocket, 1000);
+                }
             };
         }
         
@@ -569,11 +623,11 @@
                     <li class="queue-item ${index === state.current_index ? 'playing' : ''}">
                         <div class="index">${index + 1}</div>
                         <div class="thumbnail">
-                            ${item.thumbnail ? `<img src="${item.thumbnail}" alt="">` : ''}
+                            ${item.thumbnail ? `<img src="${escapeHtml(item.thumbnail)}" alt="${escapeHtml(item.title || '')}">` : ''}
                         </div>
                         <div class="info">
-                            <div class="title">${item.title}</div>
-                            <div class="artist">${item.artist}</div>
+                            <div class="title">${escapeHtml(item.title)}</div>
+                            <div class="artist">${escapeHtml(item.artist)}</div>
                         </div>
                         <button class="remove" onclick="removeFromQueue(${index})">✕</button>
                     </li>
@@ -583,12 +637,9 @@
         
         async function setDevice(device) {
             try {
-                await fetch('/api/admin/device', {
+                await apiFetch('/api/admin/device', {
                     method: 'POST',
-                    headers: {
-                        ...getAuthHeaders(),
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ device })
                 });
             } catch (e) {
@@ -649,15 +700,11 @@
             }
         }
         
-        const savedPassword = localStorage.getItem('adminPassword');
-        if (savedPassword) {
-            password = savedPassword;
-            fetch(getAuthUrl('/api/admin/clients')).then(res => {
-                if (res.ok) showAdmin();
-            }).catch(() => {});
+        const savedToken = sessionStorage.getItem('adminToken');
+        if (savedToken) {
+            authToken = savedToken;
+            showAdmin();
         }
-        
-        setInterval(loadClients, 5000);
     </script>
 </body>
 </html>

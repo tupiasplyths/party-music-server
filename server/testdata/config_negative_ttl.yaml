@@ -4,7 +4,7 @@ server:
 
 admin:
   password: "changeme"
-  session_ttl: 24h
+  session_ttl: -1h
 
 music:
   output_device: "default"
